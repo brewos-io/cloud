@@ -100,7 +100,7 @@ router.post(
       }
 
       // Validate credential is a string and reasonable length (JWT tokens are typically < 2KB)
-      if (typeof credential !== "string" || credential.length > 2048) {
+      if (typeof credential !== "string" || credential.length > 2048 || credential.length < 10) {
         return res.status(400).json({ error: "Invalid credential format" });
       }
 
@@ -122,7 +122,14 @@ router.post(
       }
 
       if (!payload?.sub || !payload?.email) {
+        console.warn("[Auth] Google token missing required fields (sub or email)");
         return res.status(401).json({ error: "Invalid token payload" });
+      }
+
+      // Validate email format from OAuth provider
+      if (typeof payload.email !== "string" || payload.email.length > 255) {
+        console.warn("[Auth] Invalid email format from Google OAuth");
+        return res.status(401).json({ error: "Invalid email in token payload" });
       }
 
       // ensureProfile returns the actual user ID (may differ if linked by email)
@@ -177,7 +184,7 @@ router.post(
       }
 
       // Validate accessToken is a string and reasonable length
-      if (typeof accessToken !== "string" || accessToken.length > 512) {
+      if (typeof accessToken !== "string" || accessToken.length > 512 || accessToken.length < 10) {
         return res.status(400).json({ error: "Invalid access token format" });
       }
 
@@ -235,7 +242,15 @@ router.post(
       }
 
       if (!userData.id) {
+        console.warn("[Auth] Facebook user data missing required ID");
         return res.status(401).json({ error: "Invalid Facebook user data" });
+      }
+
+      // Validate email if present
+      if (userData.email && (typeof userData.email !== "string" || userData.email.length > 255)) {
+        console.warn("[Auth] Invalid email format from Facebook OAuth");
+        // Don't fail - email is optional for Facebook
+        userData.email = undefined;
       }
 
       // Prefix Facebook user ID to avoid collisions with Google user IDs

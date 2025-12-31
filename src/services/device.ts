@@ -851,6 +851,42 @@ export function ensureProfile(
   const db = getDb();
   const now = nowUTC();
 
+  // Input validation
+  if (typeof userId !== "string" || userId.length === 0 || userId.length > 255) {
+    throw new Error("Invalid user ID");
+  }
+
+  if (email !== undefined && email !== null) {
+    if (typeof email !== "string" || email.length > 255) {
+      throw new Error("Invalid email format");
+    }
+    // Basic email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.warn(`[Auth] Invalid email format: ${email.substring(0, 20)}...`);
+      // Don't throw - allow OAuth providers to handle email validation
+    }
+  }
+
+  if (displayName !== undefined && displayName !== null) {
+    if (typeof displayName !== "string" || displayName.length > 255) {
+      throw new Error("Invalid display name");
+    }
+  }
+
+  if (avatarUrl !== undefined && avatarUrl !== null) {
+    if (typeof avatarUrl !== "string" || avatarUrl.length > 2048) {
+      throw new Error("Invalid avatar URL");
+    }
+    // Basic URL validation
+    try {
+      new URL(avatarUrl);
+    } catch {
+      console.warn(`[Auth] Invalid avatar URL format: ${avatarUrl.substring(0, 50)}...`);
+      // Don't throw - allow OAuth providers to handle URL validation
+    }
+  }
+
   // Check if profile exists with this exact ID
   const result = db.exec(`SELECT id FROM profiles WHERE id = ?`, [userId]);
   const profileExists = result.length > 0 && result[0].values.length > 0;
@@ -871,6 +907,8 @@ export function ensureProfile(
   }
 
   // Profile doesn't exist - check if we should link by email
+  // SECURITY: Email-based account linking without verification is a security risk.
+  // This should be replaced with email verification in production.
   if (email) {
     const existingByEmail = db.exec(
       `SELECT id, display_name, avatar_url FROM profiles WHERE email = ?`,
@@ -883,24 +921,54 @@ export function ensureProfile(
       const existingDisplayName = existingByEmail[0].values[0][1] as string | null;
       const existingAvatarUrl = existingByEmail[0].values[0][2] as string | null;
 
-      console.log(`[Auth] Linking account: ${userId} -> ${existingUserId} (email: ${email})`);
-
-      // Update existing profile with new info if not already set
-      db.run(
-        `UPDATE profiles SET 
-          display_name = COALESCE(display_name, ?),
-          avatar_url = COALESCE(avatar_url, ?),
-          updated_at = ?
-         WHERE id = ?`,
-        [
-          displayName || existingDisplayName || null,
-          avatarUrl || existingAvatarUrl || null,
-          now,
-          existingUserId,
-        ]
+      // SECURITY CHECK: Prevent linking if existing account has devices
+      // This is a safety measure to prevent account takeover
+      const deviceCount = db.exec(
+        `SELECT COUNT(*) FROM user_devices WHERE user_id = ?`,
+        [existingUserId]
       );
-      saveDatabase();
-      return existingUserId;
+      const hasDevices =
+        deviceCount.length > 0 &&
+        deviceCount[0].values.length > 0 &&
+        (deviceCount[0].values[0][0] as number) > 0;
+
+      if (hasDevices) {
+        // SECURITY WARNING: Account linking blocked - existing account has devices
+        // This prevents potential account takeover attacks
+        console.warn(
+          `[Auth] SECURITY: Account linking blocked for email ${email}. ` +
+            `Existing account ${existingUserId} has devices. ` +
+            `New account ${userId} will be created separately. ` +
+            `Consider implementing email verification for account linking.`
+        );
+        // Create new account instead of linking
+      } else {
+        // Safe to link - existing account has no devices
+        console.log(
+          `[Auth] Linking account: ${userId} -> ${existingUserId} (email: ${email})`
+        );
+        console.warn(
+          `[Auth] SECURITY WARNING: Email-based account linking without verification. ` +
+            `Consider implementing email verification for production use.`
+        );
+
+        // Update existing profile with new info if not already set
+        db.run(
+          `UPDATE profiles SET 
+            display_name = COALESCE(display_name, ?),
+            avatar_url = COALESCE(avatar_url, ?),
+            updated_at = ?
+           WHERE id = ?`,
+          [
+            displayName || existingDisplayName || null,
+            avatarUrl || existingAvatarUrl || null,
+            now,
+            existingUserId,
+          ]
+        );
+        saveDatabase();
+        return existingUserId;
+      }
     }
   }
 
