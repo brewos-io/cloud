@@ -61,6 +61,13 @@ jobs:
           command_timeout: 15m
           script: |
             set -e
+            
+            # Clone repository if it doesn't exist
+            if [ ! -d "/root/brewos-cloud" ]; then
+              echo "Cloning cloud repository..."
+              git clone https://github.com/brewos-io/cloud.git /root/brewos-cloud
+            fi
+            
             cd /root/brewos-cloud
 
             # Clean up any local changes
