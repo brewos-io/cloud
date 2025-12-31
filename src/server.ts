@@ -511,6 +511,9 @@ app.get("/api/info", (_req, res) => {
     // Mode detection
     mode: "cloud",
 
+    // OAuth configuration (Google Client ID is public, safe to expose)
+    googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+
     // Feature flags - granular capability detection
     // Cloud has all local features plus cloud-specific ones
     features: [
