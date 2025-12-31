@@ -1,4 +1,6 @@
 import "dotenv/config";
+// Import logger first to intercept all console calls
+import "./lib/logger.js";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
@@ -23,6 +25,7 @@ import {
   cleanupOrphanedDevices,
   markAllDevicesOffline,
 } from "./services/device.js";
+import { getDatabaseSize } from "./lib/database.js";
 import {
   cleanupExpiredSessions,
   startBatchUpdateInterval,
@@ -394,6 +397,10 @@ app.get("/api/health", (_req, res) => {
       rss: Math.round(memUsage.rss / 1024 / 1024),
     },
     sessionCache: getCacheStats(),
+    database: {
+      sizeBytes: getDatabaseSize(),
+      sizeMB: Math.round((getDatabaseSize() / 1024 / 1024) * 100) / 100,
+    },
   });
 });
 

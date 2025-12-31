@@ -132,3 +132,33 @@ export interface ImpersonationResponse {
   expiresAt: number;
 }
 
+// Log types
+export type LogLevel = "info" | "warn" | "error" | "debug";
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LogsResponse {
+  logs: LogEntry[];
+  hasMore: boolean;
+  total: number;
+}
+
+export interface LogSourcesResponse {
+  sources: string[];
+}
+
+export interface LogStats {
+  total: number;
+  byLevel: Record<LogLevel, number>;
+  bySource: Record<string, number>;
+  oldestTimestamp: string | null;
+  newestTimestamp: string | null;
+}
+

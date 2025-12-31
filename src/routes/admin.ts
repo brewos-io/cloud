@@ -22,6 +22,13 @@ import {
   getAllSessions,
   revokeAnySession,
 } from "../services/admin.js";
+import {
+  getLogs,
+  getLogSources,
+  getLogStats,
+  clearLogs,
+  type LogLevel,
+} from "../services/logs.js";
 
 const router = Router();
 
@@ -380,6 +387,80 @@ router.get("/connections", (req: Request, res: Response) => {
   } catch (error) {
     console.error("[Admin] Failed to get connection stats:", error);
     res.status(500).json({ error: "Failed to get connection stats" });
+  }
+});
+
+// =============================================================================
+// Log Management
+// =============================================================================
+
+/**
+ * GET /api/admin/logs
+ * Get server logs with filtering and pagination
+ */
+router.get("/logs", (req: Request, res: Response) => {
+  try {
+    const level = req.query.level as LogLevel | undefined;
+    const source = req.query.source as string | undefined;
+    const search = req.query.search as string | undefined;
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+    const beforeId = req.query.beforeId as string | undefined;
+
+    const result = getLogs({
+      level,
+      source,
+      search,
+      limit: Math.min(limit, 500), // Max 500 logs per request
+      beforeId,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("[Admin] Failed to get logs:", error);
+    res.status(500).json({ error: "Failed to get logs" });
+  }
+});
+
+/**
+ * GET /api/admin/logs/sources
+ * Get list of unique log sources
+ */
+router.get("/logs/sources", (req: Request, res: Response) => {
+  try {
+    const sources = getLogSources();
+    res.json({ sources });
+  } catch (error) {
+    console.error("[Admin] Failed to get log sources:", error);
+    res.status(500).json({ error: "Failed to get log sources" });
+  }
+});
+
+/**
+ * GET /api/admin/logs/stats
+ * Get log statistics
+ */
+router.get("/logs/stats", (req: Request, res: Response) => {
+  try {
+    const stats = getLogStats();
+    res.json(stats);
+  } catch (error) {
+    console.error("[Admin] Failed to get log stats:", error);
+    res.status(500).json({ error: "Failed to get log stats" });
+  }
+});
+
+/**
+ * DELETE /api/admin/logs
+ * Clear all logs
+ */
+router.delete("/logs", sensitiveLimiter, (req: Request, res: Response) => {
+  try {
+    clearLogs();
+    console.log(`[Admin] Logs cleared by ${req.user?.id}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("[Admin] Failed to clear logs:", error);
+    res.status(500).json({ error: "Failed to clear logs" });
   }
 });
 

@@ -40,6 +40,10 @@ interface HealthData {
     maxSize: number;
     hitRate: number;
   };
+  database: {
+    sizeBytes: number;
+    sizeMB: number;
+  };
 }
 
 export function Monitoring() {
@@ -205,6 +209,14 @@ export function Monitoring() {
                 {health?.messageQueue.pendingMessages ?? 0}
               </p>
             </div>
+            {health?.database && (
+              <div>
+                <p className="text-admin-text-secondary text-sm">Database Size</p>
+                <p className="text-admin-text font-mono">
+                  {health.database.sizeMB.toFixed(2)} MB
+                </p>
+              </div>
+            )}
             {health?.sessionCache && (
               <>
                 <div>

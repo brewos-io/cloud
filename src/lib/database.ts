@@ -324,6 +324,29 @@ export function getDb(): SqlJsDatabase {
   return db;
 }
 
+/**
+ * Get database file size in bytes
+ */
+export function getDatabaseSize(): number {
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const stats = fs.statSync(DB_PATH);
+      return stats.size;
+    }
+    return 0;
+  } catch (error) {
+    console.error("[DB] Error getting database size:", error);
+    return 0;
+  }
+}
+
+/**
+ * Get database file path
+ */
+export function getDatabasePath(): string {
+  return DB_PATH;
+}
+
 // Types
 export interface Device {
   id: string;

@@ -19,6 +19,10 @@ import type {
   ImpersonationResponse,
   ConnectionStats,
   AdminUser,
+  LogsResponse,
+  LogSourcesResponse,
+  LogStats,
+  LogLevel,
 } from "./types";
 
 const API_BASE = "/api";
@@ -281,6 +285,35 @@ async function getConnections(): Promise<ConnectionStats> {
   return apiGet("/admin/connections");
 }
 
+// Log APIs
+async function getLogs(options: {
+  level?: LogLevel;
+  source?: string;
+  search?: string;
+  limit?: number;
+  beforeId?: string;
+}): Promise<LogsResponse> {
+  const params = new URLSearchParams();
+  if (options.level) params.set("level", options.level);
+  if (options.source) params.set("source", options.source);
+  if (options.search) params.set("search", options.search);
+  if (options.limit) params.set("limit", options.limit.toString());
+  if (options.beforeId) params.set("beforeId", options.beforeId);
+  return apiGet(`/admin/logs?${params}`);
+}
+
+async function getLogSources(): Promise<LogSourcesResponse> {
+  return apiGet("/admin/logs/sources");
+}
+
+async function getLogStats(): Promise<LogStats> {
+  return apiGet("/admin/logs/stats");
+}
+
+async function clearLogs(): Promise<SuccessResponse> {
+  return apiDelete("/admin/logs");
+}
+
 // Health APIs (not admin protected)
 async function getHealth(): Promise<Record<string, unknown>> {
   return apiGet("/health");
@@ -319,6 +352,12 @@ export const api = {
   getConnections,
   getHealth,
   getHealthDetailed,
+
+  // Logs
+  getLogs,
+  getLogSources,
+  getLogStats,
+  clearLogs,
 };
 
 export { ApiError };
