@@ -1,5 +1,6 @@
 # Deploy to STAGING on push to main
 # Production deploys happen via release.yml when a version tag is pushed
+# Updated: Added VITE_GOOGLE_CLIENT_ID support in app CI workflow
 name: "Main → Deploy to Staging"
 
 on:
