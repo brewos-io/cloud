@@ -136,17 +136,23 @@ jobs:
             });
             console.log(`Found ${recentRuns.workflow_runs.length} recent workflow run(s)`);
 
-            // Combine and deduplicate runs - prioritize commit SHA matching
+            // Combine and deduplicate runs
             const allRuns = [...runsBySha.workflow_runs];
+            const runsByTagName = [];
 
-            // Add runs from tag search, but only if they match the commit SHA
-            // This prevents picking up runs from different versions with similar tag names
+            // Add runs from tag search
             runsByTag.workflow_runs.forEach(run => {
-              if (!allRuns.find(r => r.id === run.id) && run.head_sha === commitSha) {
-                allRuns.push(run);
-                console.log(`Added run ${run.id} from tag search (matches commit SHA)`);
-              } else if (run.head_sha !== commitSha) {
-                console.log(`Skipping run ${run.id} from tag search (commit SHA mismatch: ${run.head_sha} != ${commitSha})`);
+              if (!allRuns.find(r => r.id === run.id)) {
+                if (run.head_sha === commitSha) {
+                  allRuns.push(run);
+                  console.log(`Added run ${run.id} from tag search (matches commit SHA)`);
+                } else if (run.head_branch === tag) {
+                  // Keep track of runs that match by tag name but not commit SHA
+                  runsByTagName.push(run);
+                  console.log(`Found run ${run.id} matching tag name but different commit SHA: ${run.head_sha}`);
+                } else {
+                  console.log(`Skipping run ${run.id} from tag search (no match: head_sha=${run.head_sha}, head_branch=${run.head_branch})`);
+                }
               }
             });
 
@@ -157,30 +163,45 @@ jobs:
               }
             });
 
-            // Also check if any recent run matches the tag name AND commit SHA
-            // Only add if commit SHA matches to avoid picking wrong version
+            // Also check recent runs for tag name matches (fallback for moved tags)
             recentRuns.workflow_runs.forEach(run => {
-              if (!allRuns.find(r => r.id === run.id) && run.head_sha === commitSha) {
-                // Check if run was triggered by this tag (and matches commit)
-                if (run.head_branch === tag || run.head_ref === tag || 
-                    (run.head_branch && run.head_branch.includes(tag.replace('app-', '')))) {
-                  allRuns.push(run);
+              if (!allRuns.find(r => r.id === run.id) && !runsByTagName.find(r => r.id === run.id)) {
+                if (run.head_branch === tag) {
+                  runsByTagName.push(run);
+                  console.log(`Found recent run ${run.id} matching tag name: ${run.head_branch}`);
                 }
               }
             });
 
-            console.log(`Total unique workflow run(s) found: ${allRuns.length}`);
+            console.log(`Total runs matching commit SHA: ${allRuns.length}`);
+            console.log(`Total runs matching tag name (fallback): ${runsByTagName.length}`);
             if (allRuns.length > 0) {
-              console.log(`Run details:`);
+              console.log(`Commit SHA matched runs:`);
               allRuns.forEach(run => {
-                console.log(`  - Run ${run.id}: status=${run.status}, conclusion=${run.conclusion}, head_sha=${run.head_sha}, head_branch=${run.head_branch}, head_ref=${run.head_ref}`);
+                console.log(`  - Run ${run.id}: status=${run.status}, conclusion=${run.conclusion}, head_sha=${run.head_sha}`);
+              });
+            }
+            if (runsByTagName.length > 0) {
+              console.log(`Tag name matched runs (fallback):`);
+              runsByTagName.forEach(run => {
+                console.log(`  - Run ${run.id}: status=${run.status}, conclusion=${run.conclusion}, head_sha=${run.head_sha}, head_branch=${run.head_branch}`);
               });
             }
 
-            // CRITICAL: Filter to only runs that match the commit SHA
-            // This ensures we don't pick up runs from different tags/versions
-            const matchingRuns = allRuns.filter(run => run.head_sha === commitSha);
+            // STRATEGY: 
+            // 1. First prefer runs matching commit SHA (ideal case)
+            // 2. If none found, use runs matching tag name (handles moved tags or manual triggers)
+            let matchingRuns = allRuns.filter(run => run.head_sha === commitSha);
             console.log(`Runs matching commit SHA ${commitSha}: ${matchingRuns.length}`);
+
+            // Fallback: if no commit SHA match, use tag name match
+            // This handles cases where:
+            // - Tag was moved/recreated after workflow started
+            // - Workflow was manually triggered
+            if (matchingRuns.length === 0 && runsByTagName.length > 0) {
+              console.log(`⚠️ No commit SHA match found. Using tag name fallback...`);
+              matchingRuns = runsByTagName;
+            }
 
             if (matchingRuns.length > 0) {
               // Prefer completed successful runs first (but only for the correct commit)
@@ -220,16 +241,6 @@ jobs:
                   throw new Error(`Workflow run ${workflowRun.id} completed with conclusion: ${workflowRun.conclusion}`);
                 }
               }
-            } else if (allRuns.length > 0) {
-              // No runs match the commit SHA, but we found some runs
-              // This might mean the tag points to a different commit than expected
-              console.log(`⚠️ Warning: Found ${allRuns.length} workflow run(s) but none match commit SHA ${commitSha}`);
-              console.log(`Available runs have these commit SHAs:`);
-              allRuns.forEach(run => {
-                console.log(`  - Run ${run.id}: ${run.head_sha} (${run.head_branch || 'unknown branch'})`);
-              });
-              // Don't use these runs - wait for the correct one to appear
-              workflowRun = null;
             }
 
             // If no workflow run found at all, wait for it to start (tag might have just been pushed)
@@ -240,7 +251,9 @@ jobs:
               
               while (!workflowRun && attempts < maxInitialAttempts && (Date.now() - startTime) < maxWaitTime) {
                 attempts++;
-                const { data: newRuns } = await github.rest.actions.listWorkflowRuns({
+                
+                // Search by commit SHA first
+                const { data: newRunsBySha } = await github.rest.actions.listWorkflowRuns({
                   owner: 'brewos-io',
                   repo: 'app',
                   workflow_id: 'release.yml',
@@ -248,20 +261,34 @@ jobs:
                   per_page: 10
                 });
                 
-                if (newRuns.workflow_runs.length > 0) {
+                // Also search recent runs for tag name match (fallback)
+                const { data: recentRunsCheck } = await github.rest.actions.listWorkflowRuns({
+                  owner: 'brewos-io',
+                  repo: 'app',
+                  workflow_id: 'release.yml',
+                  per_page: 20
+                });
+                
+                // Combine: prefer commit SHA match, fallback to tag name match
+                let candidateRuns = newRunsBySha.workflow_runs;
+                if (candidateRuns.length === 0) {
+                  candidateRuns = recentRunsCheck.workflow_runs.filter(run => run.head_branch === tag);
+                }
+                
+                if (candidateRuns.length > 0) {
                   // Check for completed successful first
-                  const completed = newRuns.workflow_runs.find(run => 
+                  const completed = candidateRuns.find(run => 
                     run.status === 'completed' && run.conclusion === 'success'
                   );
                   if (completed) {
                     workflowRun = completed;
-                    console.log(`✓ Found completed workflow run: ${workflowRun.id}`);
+                    console.log(`✓ Found completed workflow run: ${workflowRun.id} (head_branch: ${workflowRun.head_branch})`);
                     core.setOutput('run_id', workflowRun.id);
                     return;
                   }
                   
-                  workflowRun = newRuns.workflow_runs[0];
-                  console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
+                  workflowRun = candidateRuns[0];
+                  console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, head_branch: ${workflowRun.head_branch})`);
                   break;
                 }
                 
@@ -302,7 +329,9 @@ jobs:
                 console.log(`Tag is recent, continuing to wait for workflow to start...`);
                 while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
                   attempts++;
-                  const { data: newRuns } = await github.rest.actions.listWorkflowRuns({
+                  
+                  // Search by commit SHA first
+                  const { data: newRunsBySha2 } = await github.rest.actions.listWorkflowRuns({
                     owner: 'brewos-io',
                     repo: 'app',
                     workflow_id: 'release.yml',
@@ -310,9 +339,23 @@ jobs:
                     per_page: 10
                   });
                   
-                  if (newRuns.workflow_runs.length > 0) {
-                    workflowRun = newRuns.workflow_runs[0];
-                    console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
+                  // Also search recent runs for tag name match (fallback)
+                  const { data: recentRunsCheck2 } = await github.rest.actions.listWorkflowRuns({
+                    owner: 'brewos-io',
+                    repo: 'app',
+                    workflow_id: 'release.yml',
+                    per_page: 20
+                  });
+                  
+                  // Combine: prefer commit SHA match, fallback to tag name match
+                  let candidateRuns2 = newRunsBySha2.workflow_runs;
+                  if (candidateRuns2.length === 0) {
+                    candidateRuns2 = recentRunsCheck2.workflow_runs.filter(run => run.head_branch === tag);
+                  }
+                  
+                  if (candidateRuns2.length > 0) {
+                    workflowRun = candidateRuns2[0];
+                    console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, head_branch: ${workflowRun.head_branch})`);
                     break;
                   }
                   
@@ -321,7 +364,7 @@ jobs:
                 }
                 
                 if (!workflowRun) {
-                  throw new Error(`No workflow run found for commit ${commitSha} after ${maxWaitTime/1000/60} minutes`);
+                  throw new Error(`No workflow run found for tag ${tag} (commit ${commitSha}) after ${maxWaitTime/1000/60} minutes`);
                 }
               }
             }
