@@ -97,7 +97,7 @@ jobs:
             // Find workflow runs for this commit
             console.log(`Looking for workflow runs for commit ${commitSha}...`);
             let workflowRun = null;
-            
+
             // First, try to find any existing workflow run (completed or in progress)
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: 'brewos-io',
@@ -106,7 +106,7 @@ jobs:
               head_sha: commitSha,
               per_page: 20
             });
-            
+
             if (runs.workflow_runs.length > 0) {
               // Prefer completed successful runs first
               const completedRun = runs.workflow_runs.find(run => 
@@ -141,7 +141,7 @@ jobs:
                 }
               }
             }
-            
+
             // If no workflow run found, the tag might be old or workflow hasn't started
             if (!workflowRun) {
               // Check when the tag was created to determine if we should wait
@@ -219,7 +219,7 @@ jobs:
                 }
               }
             }
-            
+
             // If workflow is already completed successfully, use it immediately
             if (workflowRun.status === 'completed' && workflowRun.conclusion === 'success') {
               console.log(`✓ Workflow run ${workflowRun.id} already completed successfully!`);
