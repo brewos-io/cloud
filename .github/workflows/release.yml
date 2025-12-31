@@ -18,9 +18,81 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  wait-for-app:
+    name: Wait for App Build
+    runs-on: ubuntu-latest
+    outputs:
+      app-version: ${{ steps.version.outputs.version }}
+      app-version-num: ${{ steps.version.outputs.version_num }}
+    steps:
+      - name: Get Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION_NUM="${VERSION#cloud-v}"
+          echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+          APP_VERSION="app-${VERSION_NUM}"
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Wait for App Workflow
+        uses: lewagon/wait-on-check-action@v1.3.4
+        id: wait
+        with:
+          ref: ${{ steps.version.outputs.app_version }}
+          repo: brewos-io/app
+          check-name: 'Build App'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+
+      - name: Get App Commit SHA
+        id: get-sha
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = '${{ steps.version.outputs.app_version }}';
+            
+            // Get the commit SHA for the tag
+            const { data: ref } = await github.rest.git.getRef({
+              owner: 'brewos-io',
+              repo: 'app',
+              ref: `tags/${tag}`
+            });
+            
+            const commitSha = ref.object.sha;
+            console.log(`Tag ${tag} points to commit: ${commitSha}`);
+            core.setOutput('commit_sha', commitSha);
+
+      - name: Download App Artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: release.yml
+          workflow_conclusion: success
+          commit: ${{ steps.get-sha.outputs.commit_sha }}
+          name: app-cloud-${{ steps.version.outputs.app_version }}
+          path: app-build
+          repo: brewos-io/app
+          if_no_artifact_found: fail
+
+      - name: Upload App Build for Deployment
+        uses: actions/upload-artifact@v6
+        with:
+          name: app-build-for-deploy
+          path: app-build/
+          retention-days: 1
+
   deploy-production:
+    needs: wait-for-app
     name: Deploy to Production
     runs-on: ubuntu-latest
     environment:
@@ -47,6 +119,22 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           VERSION_NUM="${VERSION#cloud-v}"
           echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+
+      - name: Download App Build Artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: app-build-for-deploy
+          path: app-build
+
+      - name: Upload App Build to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST || 'cloud.brewos.io' }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "app-build/*"
+          target: "/tmp/app-build"
+          strip_components: 0
 
       - name: Deploy to production server
         uses: appleboy/ssh-action@v1.2.4
@@ -78,38 +166,11 @@ jobs:
             git fetch origin --tags --force
             git checkout ${RELEASE_VERSION}
 
-            # Checkout app repository (use matching version tag if available)
-            APP_VERSION="app-${RELEASE_VERSION#cloud-}"
-            if [ ! -d "../app" ]; then
-              git clone https://github.com/brewos-io/app.git ../app
-            fi
-            cd ../app
-            git fetch origin --tags --force
-
-            # Try to checkout matching app version, fallback to main
-            if git rev-parse --verify "refs/tags/${APP_VERSION}" >/dev/null 2>&1; then
-              echo "Using app version: ${APP_VERSION}"
-              git checkout ${APP_VERSION}
-            else
-              echo "App version ${APP_VERSION} not found, using main"
-              git checkout main
-              git pull origin main
-            fi
-
-            # Build app for cloud
-            npm ci
-            cat > .env << EOF
-            VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-            VITE_CLOUD_WS_URL=wss://cloud.brewos.io/ws
-            VITE_ENVIRONMENT=production
-            EOF
-            VERSION_NUM="${RELEASE_VERSION#cloud-v}"
-            NODE_OPTIONS="--max-old-space-size=4096" RELEASE_VERSION="$VERSION_NUM" npm run build
-
-            # Copy built app to cloud service
-            cd ../brewos-cloud
+            # Copy pre-built app from uploaded artifact
             rm -rf web
-            cp -r ../app/dist web
+            mkdir -p web
+            cp -r /tmp/app-build/* web/
+            rm -rf /tmp/app-build
 
             # Create .env for cloud service
             cat > .env << EOF
