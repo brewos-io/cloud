@@ -453,11 +453,21 @@ jobs:
             git fetch origin --tags --force
             git checkout ${RELEASE_VERSION}
 
-            # Copy pre-built app from uploaded artifact
-            rm -rf web
-            mkdir -p web
-            cp -r /tmp/app-build/* web/
-            rm -rf /tmp/app-build
+# Copy pre-built app from uploaded artifact
+rm -rf web
+mkdir -p web
+# Handle case where SCP creates nested directory structure
+if [ -d "/tmp/app-build/app-build" ]; then
+  # Files are nested in app-build/app-build
+  cp -r /tmp/app-build/app-build/* web/
+elif [ -d "/tmp/app-build" ]; then
+  # Files are directly in app-build
+  cp -r /tmp/app-build/* web/
+else
+  echo "ERROR: /tmp/app-build not found!"
+  exit 1
+fi
+rm -rf /tmp/app-build
 
             # Create .env for cloud service
             cat > .env << EOF
