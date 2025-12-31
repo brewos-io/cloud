@@ -19,6 +19,7 @@ import authRouter from "./routes/auth.js";
 import devicesRouter from "./routes/devices.js";
 import pushRouter from "./routes/push.js";
 import adminRouter from "./routes/admin.js";
+import logsRouter from "./routes/logs.js";
 import { initDatabase } from "./lib/database.js";
 import {
   cleanupExpiredTokens,
@@ -576,6 +577,17 @@ app.use(
   devicesRouter
 );
 app.use("/api/push", pushRouter);
+
+// Logs routes - inject device relay for proxying device log API calls
+app.use(
+  "/api/logs",
+  (req, _res, next) => {
+    // Inject device relay for proxying requests to devices
+    (req as unknown as Record<string, unknown>).deviceRelay = deviceRelay;
+    next();
+  },
+  logsRouter
+);
 
 // Admin routes - inject device relay and client proxy functions
 app.use(
