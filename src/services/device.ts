@@ -333,6 +333,7 @@ export function userOwnsDevice(userId: string, deviceId: string): boolean {
 
 /**
  * Update device online status
+ * Only updates last_seen_at when device comes online, not when going offline
  */
 export function updateDeviceStatus(
   deviceId: string,
@@ -342,16 +343,32 @@ export function updateDeviceStatus(
   const db = getDb();
   const now = nowUTC();
 
-  if (firmwareVersion) {
-    db.run(
-      `UPDATE devices SET is_online = ?, last_seen_at = ?, firmware_version = ?, updated_at = ? WHERE id = ?`,
-      [isOnline ? 1 : 0, now, firmwareVersion, now, deviceId]
-    );
+  if (isOnline) {
+    // Device coming online: update last_seen_at to current time
+    if (firmwareVersion) {
+      db.run(
+        `UPDATE devices SET is_online = ?, last_seen_at = ?, firmware_version = ?, updated_at = ? WHERE id = ?`,
+        [1, now, firmwareVersion, now, deviceId]
+      );
+    } else {
+      db.run(
+        `UPDATE devices SET is_online = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`,
+        [1, now, now, deviceId]
+      );
+    }
   } else {
-    db.run(
-      `UPDATE devices SET is_online = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`,
-      [isOnline ? 1 : 0, now, now, deviceId]
-    );
+    // Device going offline: only update is_online and updated_at, keep last_seen_at unchanged
+    if (firmwareVersion) {
+      db.run(
+        `UPDATE devices SET is_online = ?, firmware_version = ?, updated_at = ? WHERE id = ?`,
+        [0, firmwareVersion, now, deviceId]
+      );
+    } else {
+      db.run(
+        `UPDATE devices SET is_online = ?, updated_at = ? WHERE id = ?`,
+        [0, now, deviceId]
+      );
+    }
   }
 
   saveDatabase();
