@@ -10,9 +10,11 @@ services:
     volumes:
       - brewos-data:/data
       - ../web/dist:/app/web:ro
+      - ../app/dist:/app/app/dist:ro
     environment:
       - PORT=3001
       - DATA_DIR=/data
+      - APP_DIST_PATH=/app/app/dist
       - WEB_DIST_PATH=/app/web
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - TRUST_PROXY=${TRUST_PROXY:-false}

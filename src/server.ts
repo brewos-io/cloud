@@ -127,7 +127,9 @@ app.use((_req, res, next) => {
 // Serve static files (the shared app UI)
 // Default assumes cloud repo is sibling to app repo
 const webDistPath = path.resolve(
-  process.env.APP_DIST_PATH || process.env.WEB_DIST_PATH || path.join(process.cwd(), "../app/dist")
+  process.env.APP_DIST_PATH ||
+    process.env.WEB_DIST_PATH ||
+    path.join(process.cwd(), "../app/dist")
 );
 
 // Admin UI path (relative to cloud service)

@@ -227,8 +227,29 @@ jobs:
             PORT=3001
             DATA_DIR=/data
             TRUST_PROXY=true
-            APP_DIST_PATH=./web
+            APP_DIST_PATH=/app/web
             EOF
+
+            # Update docker-compose.yml for staging deployment
+            # The app files are copied into the Docker image at /app/web during build
+            # So we should NOT mount ../web/dist:/app/web (that's the marketing site)
+            # and we should set APP_DIST_PATH=/app/web to use files from the image
+            if [ -f "docker-compose.yml" ]; then
+              # Remove the volume mount for /app/web since files are in the image
+              sed -i '/- \.\.\/web\/dist:\/app\/web:ro/d' docker-compose.yml
+              
+              # Remove the volume mount for /app/app/dist since we're using /app/web from image
+              sed -i '/- \.\.\/app\/dist:\/app\/app\/dist:ro/d' docker-compose.yml
+              
+              # Add APP_DIST_PATH to environment section if not already present
+              if ! grep -q "APP_DIST_PATH" docker-compose.yml; then
+                # Insert APP_DIST_PATH after WEB_DIST_PATH line
+                sed -i '/WEB_DIST_PATH/a\      - APP_DIST_PATH=/app/web' docker-compose.yml
+              else
+                # Update existing APP_DIST_PATH line
+                sed -i 's|APP_DIST_PATH=.*|APP_DIST_PATH=/app/web|' docker-compose.yml
+              fi
+            fi
 
             # Build Admin UI
             cd admin
