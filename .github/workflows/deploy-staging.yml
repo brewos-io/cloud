@@ -67,9 +67,9 @@ jobs:
             const maxWaitTime = 30 * 60 * 1000; // 30 minutes
             const pollInterval = 10 * 1000; // 10 seconds
             const startTime = Date.now();
-            
+
             console.log(`Looking for latest commit on ${branch} in brewos-io/app`);
-            
+
             // Get the latest commit SHA from main branch
             let commitSha;
             try {
@@ -83,14 +83,14 @@ jobs:
             } catch (error) {
               throw new Error(`Error getting commit from ${branch} in brewos-io/app: ${error.message}`);
             }
-            
+
             core.setOutput('commit_sha', commitSha);
-            
+
             // Find workflow runs for this commit
             console.log(`Looking for workflow runs for commit ${commitSha}...`);
             let workflowRun = null;
             let attempts = 0;
-            
+
             while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
               attempts++;
               const { data: runs } = await github.rest.actions.listWorkflowRuns({
@@ -115,11 +115,11 @@ jobs:
               console.log(`Attempt ${attempts}: No workflow run found yet, waiting ${pollInterval/1000}s...`);
               await new Promise(resolve => setTimeout(resolve, pollInterval));
             }
-            
+
             if (!workflowRun) {
               throw new Error(`No workflow run found for commit ${commitSha} after ${maxWaitTime/1000/60} minutes`);
             }
-            
+
             // Wait for the workflow to complete
             console.log(`Waiting for workflow run ${workflowRun.id} to complete...`);
             while (workflowRun.status !== 'completed' && (Date.now() - startTime) < maxWaitTime) {
@@ -134,15 +134,15 @@ jobs:
               workflowRun = run;
               console.log(`Status: ${workflowRun.status}${workflowRun.conclusion ? `, conclusion: ${workflowRun.conclusion}` : ''}`);
             }
-            
+
             if (workflowRun.status !== 'completed') {
               throw new Error(`Workflow run ${workflowRun.id} did not complete within ${maxWaitTime/1000/60} minutes`);
             }
-            
+
             if (workflowRun.conclusion !== 'success') {
               throw new Error(`Workflow run ${workflowRun.id} completed with conclusion: ${workflowRun.conclusion}`);
             }
-            
+
             console.log(`✓ Workflow run ${workflowRun.id} completed successfully!`);
             core.setOutput('run_id', workflowRun.id);
 
@@ -201,13 +201,13 @@ jobs:
           command_timeout: 15m
           script: |
             set -e
-            
+
             # Clone repository if it doesn't exist
             if [ ! -d "/root/brewos-cloud" ]; then
               echo "Cloning cloud repository..."
               git clone https://github.com/brewos-io/cloud.git /root/brewos-cloud
             fi
-            
+
             cd /root/brewos-cloud
 
             # Reset to match repo exactly
@@ -215,21 +215,21 @@ jobs:
             git reset --hard origin/main
             git clean -fd
 
-# Copy pre-built app from uploaded artifact
-rm -rf web
-mkdir -p web
-# Handle case where SCP creates nested directory structure
-if [ -d "/tmp/app-build/app-build" ]; then
-  # Files are nested in app-build/app-build
-  cp -r /tmp/app-build/app-build/* web/
-elif [ -d "/tmp/app-build" ]; then
-  # Files are directly in app-build
-  cp -r /tmp/app-build/* web/
-else
-  echo "ERROR: /tmp/app-build not found!"
-  exit 1
-fi
-rm -rf /tmp/app-build
+            # Copy pre-built app from uploaded artifact
+            rm -rf web
+            mkdir -p web
+            # Handle case where SCP creates nested directory structure
+            if [ -d "/tmp/app-build/app-build" ]; then
+              # Files are nested in app-build/app-build
+              cp -r /tmp/app-build/app-build/* web/
+            elif [ -d "/tmp/app-build" ]; then
+              # Files are directly in app-build
+              cp -r /tmp/app-build/* web/
+            else
+              echo "ERROR: /tmp/app-build not found!"
+              exit 1
+            fi
+            rm -rf /tmp/app-build
 
             # Create .env for cloud service
             cat > .env << EOF
@@ -302,4 +302,3 @@ rm -rf /tmp/app-build
             echo "✗ Health check failed!"
             docker compose logs --tail=50
             exit 1
-
