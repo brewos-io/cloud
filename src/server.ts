@@ -39,7 +39,8 @@ const port = process.env.PORT || 3001;
 
 // Trust proxy - required when behind reverse proxy (nginx, Caddy, etc.)
 // This allows Express to correctly identify client IPs and handle X-Forwarded-* headers
-app.set("trust proxy", true);
+// Set to 1 to trust only the first proxy (more secure than trusting all proxies)
+app.set("trust proxy", 1);
 
 // Middleware
 // CORS configuration - CORS_ORIGIN must be set in production
@@ -146,6 +147,7 @@ const staticFileLimiter = rateLimit({
   max: 60, // limit each IP to 60 requests per minute
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
 });
 
 // Serve admin UI at /admin

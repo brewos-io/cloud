@@ -33,6 +33,7 @@ const generalLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -43,6 +44,7 @@ const authStrictLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many login attempts, please try again later" },
 });
 
@@ -53,6 +55,7 @@ const authenticatedLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -63,6 +66,7 @@ const sensitiveOperationLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -100,7 +104,11 @@ router.post(
       }
 
       // Validate credential is a string and reasonable length (JWT tokens are typically < 2KB)
-      if (typeof credential !== "string" || credential.length > 2048 || credential.length < 10) {
+      if (
+        typeof credential !== "string" ||
+        credential.length > 2048 ||
+        credential.length < 10
+      ) {
         return res.status(400).json({ error: "Invalid credential format" });
       }
 
@@ -122,18 +130,27 @@ router.post(
       }
 
       if (!payload?.sub || !payload?.email) {
-        console.warn("[Auth] Google token missing required fields (sub or email)");
+        console.warn(
+          "[Auth] Google token missing required fields (sub or email)"
+        );
         return res.status(401).json({ error: "Invalid token payload" });
       }
 
       // Validate email format from OAuth provider
       if (typeof payload.email !== "string" || payload.email.length > 255) {
         console.warn("[Auth] Invalid email format from Google OAuth");
-        return res.status(401).json({ error: "Invalid email in token payload" });
+        return res
+          .status(401)
+          .json({ error: "Invalid email in token payload" });
       }
 
       // ensureProfile returns the actual user ID (may differ if linked by email)
-      const userId = ensureProfile(payload.sub, payload.email, payload.name, payload.picture);
+      const userId = ensureProfile(
+        payload.sub,
+        payload.email,
+        payload.name,
+        payload.picture
+      );
 
       const metadata = {
         userAgent: req.headers["user-agent"],
@@ -145,7 +162,11 @@ router.post(
       // Check if user is admin (after profile is created/updated)
       const isAdmin = checkUserIsAdmin(userId);
 
-      console.log(`[Auth] User ${payload.email} logged in via Google${isAdmin ? " (admin)" : ""}`);
+      console.log(
+        `[Auth] User ${payload.email} logged in via Google${
+          isAdmin ? " (admin)" : ""
+        }`
+      );
 
       res.json({
         accessToken: tokens.accessToken,
@@ -184,7 +205,11 @@ router.post(
       }
 
       // Validate accessToken is a string and reasonable length
-      if (typeof accessToken !== "string" || accessToken.length > 512 || accessToken.length < 10) {
+      if (
+        typeof accessToken !== "string" ||
+        accessToken.length > 512 ||
+        accessToken.length < 10
+      ) {
         return res.status(400).json({ error: "Invalid access token format" });
       }
 
@@ -195,7 +220,9 @@ router.post(
 
       // Verify the token with Facebook's Debug Token endpoint
       // This confirms the token is valid and was issued for our app
-      const debugUrl = `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
+      const debugUrl = `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(
+        accessToken
+      )}&access_token=${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
 
       let debugData: {
         data?: {
@@ -207,10 +234,12 @@ router.post(
       };
       try {
         const debugResponse = await fetch(debugUrl);
-        debugData = await debugResponse.json() as typeof debugData;
+        debugData = (await debugResponse.json()) as typeof debugData;
       } catch (error) {
         console.error("[Auth] Facebook token debug request failed:", error);
-        return res.status(401).json({ error: "Failed to verify Facebook token" });
+        return res
+          .status(401)
+          .json({ error: "Failed to verify Facebook token" });
       }
 
       if (!debugData.data?.is_valid) {
@@ -225,7 +254,9 @@ router.post(
       }
 
       // Get user info from Facebook Graph API
-      const userUrl = `https://graph.facebook.com/me?fields=id,email,name,picture.type(large)&access_token=${encodeURIComponent(accessToken)}`;
+      const userUrl = `https://graph.facebook.com/me?fields=id,email,name,picture.type(large)&access_token=${encodeURIComponent(
+        accessToken
+      )}`;
 
       let userData: {
         id?: string;
@@ -235,10 +266,12 @@ router.post(
       };
       try {
         const userResponse = await fetch(userUrl);
-        userData = await userResponse.json() as typeof userData;
+        userData = (await userResponse.json()) as typeof userData;
       } catch (error) {
         console.error("[Auth] Facebook user info request failed:", error);
-        return res.status(401).json({ error: "Failed to get Facebook user info" });
+        return res
+          .status(401)
+          .json({ error: "Failed to get Facebook user info" });
       }
 
       if (!userData.id) {
@@ -247,7 +280,10 @@ router.post(
       }
 
       // Validate email if present
-      if (userData.email && (typeof userData.email !== "string" || userData.email.length > 255)) {
+      if (
+        userData.email &&
+        (typeof userData.email !== "string" || userData.email.length > 255)
+      ) {
         console.warn("[Auth] Invalid email format from Facebook OAuth");
         // Don't fail - email is optional for Facebook
         userData.email = undefined;
@@ -272,7 +308,11 @@ router.post(
       // Check if user is admin
       const isAdmin = checkUserIsAdmin(userId);
 
-      console.log(`[Auth] User ${email || providerUserId} logged in via Facebook${isAdmin ? " (admin)" : ""}`);
+      console.log(
+        `[Auth] User ${email || providerUserId} logged in via Facebook${
+          isAdmin ? " (admin)" : ""
+        }`
+      );
 
       res.json({
         accessToken: tokens.accessToken,

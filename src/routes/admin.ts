@@ -42,6 +42,7 @@ const adminLimiter = rateLimit({
   max: 200, // Higher limit for admin operations
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -51,6 +52,7 @@ const sensitiveLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 

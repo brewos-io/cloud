@@ -31,6 +31,7 @@ const generalLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -41,6 +42,7 @@ const strictLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -50,6 +52,7 @@ const writeLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
   message: { error: "Too many requests, please try again later" },
 });
 
