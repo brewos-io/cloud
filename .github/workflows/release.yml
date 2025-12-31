@@ -97,7 +97,7 @@ jobs:
             // Find workflow runs for this commit
             console.log(`Looking for workflow runs for commit ${commitSha}...`);
             let workflowRun = null;
-            
+
             // First, search broadly for any workflow run for this commit (completed or in progress)
             // Search both by commit SHA and by checking recent runs
             console.log(`Searching for workflow runs by commit SHA...`);
@@ -108,7 +108,7 @@ jobs:
               head_sha: commitSha,
               per_page: 50
             });
-            
+
             // Also search recent workflow runs to catch any that might not be indexed by SHA yet
             console.log(`Searching recent workflow runs...`);
             const { data: recentRuns } = await github.rest.actions.listWorkflowRuns({
@@ -117,7 +117,7 @@ jobs:
               workflow_id: 'release.yml',
               per_page: 100
             });
-            
+
             // Combine and deduplicate runs
             const allRuns = [...runsBySha.workflow_runs];
             recentRuns.workflow_runs.forEach(run => {
@@ -125,9 +125,9 @@ jobs:
                 allRuns.push(run);
               }
             });
-            
+
             console.log(`Found ${allRuns.length} workflow run(s) for commit ${commitSha}`);
-            
+
             if (allRuns.length > 0) {
               // Prefer completed successful runs first
               const completedRun = allRuns.find(run => 
@@ -164,7 +164,7 @@ jobs:
                 }
               }
             }
-            
+
             // If no workflow run found at all, wait for it to start (tag might have just been pushed)
             if (!workflowRun) {
               console.log(`No workflow run found yet. Tag exists, so workflow should start soon...`);
@@ -258,7 +258,7 @@ jobs:
                 }
               }
             }
-            
+
             // If workflow is already completed successfully, use it immediately
             if (workflowRun.status === 'completed' && workflowRun.conclusion === 'success') {
               console.log(`✓ Workflow run ${workflowRun.id} already completed successfully!`);
