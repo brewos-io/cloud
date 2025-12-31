@@ -1,7 +1,7 @@
 # BrewOS Cloud
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/brewos-io/firmware/main/assets/1080/horizontal/full-color/Brewos-1080.png" alt="BrewOS Logo" width="300">
+  <img src="https://raw.githubusercontent.com/brewos-io/.github/main/assets/1080/horizontal/full-color/Brewos-1080.png" alt="BrewOS Logo" width="300">
 </p>
 
 <p align="center">
