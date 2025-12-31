@@ -1,0 +1,158 @@
+# Build and deploy cloud service to production
+# Triggered when a version tag (cloud-v*) is pushed
+name: "Release: Deploy to Production"
+
+on:
+  push:
+    tags:
+      - "cloud-v*" # e.g., cloud-v0.2.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g., cloud-v0.2.0)"
+        required: true
+
+concurrency:
+  group: release-cloud
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://cloud.brewos.io
+    steps:
+      - name: Determine ref to checkout
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "ref=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.ref }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION_NUM="${VERSION#cloud-v}"
+          echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.4
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST || 'cloud.brewos.io' }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: GOOGLE_CLIENT_ID,RELEASE_VERSION
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /root/brewos-cloud
+
+            # Clean up any local changes
+            git reset --hard
+            git clean -fd
+
+            # Fetch the release tag
+            git fetch origin --tags --force
+            git checkout ${RELEASE_VERSION}
+
+            # Checkout app repository (use matching version tag if available)
+            APP_VERSION="app-${RELEASE_VERSION#cloud-}"
+            if [ ! -d "../app" ]; then
+              git clone https://github.com/brewos-io/app.git ../app
+            fi
+            cd ../app
+            git fetch origin --tags --force
+
+            # Try to checkout matching app version, fallback to main
+            if git rev-parse --verify "refs/tags/${APP_VERSION}" >/dev/null 2>&1; then
+              echo "Using app version: ${APP_VERSION}"
+              git checkout ${APP_VERSION}
+            else
+              echo "App version ${APP_VERSION} not found, using main"
+              git checkout main
+              git pull origin main
+            fi
+
+            # Build app for cloud
+            npm ci
+            cat > .env << EOF
+            VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            VITE_CLOUD_WS_URL=wss://cloud.brewos.io/ws
+            VITE_ENVIRONMENT=production
+            EOF
+            VERSION_NUM="${RELEASE_VERSION#cloud-v}"
+            NODE_OPTIONS="--max-old-space-size=4096" RELEASE_VERSION="$VERSION_NUM" npm run build
+
+            # Copy built app to cloud service
+            cd ../brewos-cloud
+            rm -rf web
+            cp -r ../app/dist web
+
+            # Create .env for cloud service
+            cat > .env << EOF
+            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            PORT=3001
+            DATA_DIR=/data
+            TRUST_PROXY=true
+            APP_DIST_PATH=./web
+            EOF
+
+            # Build Admin UI
+            cd admin
+            npm ci
+            npm run build
+            cd ..
+
+            # Get version from package.json for logging
+            VERSION=$(node -p "require('./package.json').version")
+            echo "Building cloud service version: $VERSION"
+
+            # Build Docker image
+            if [ -f "scripts/docker-build.sh" ]; then
+              bash scripts/docker-build.sh
+            else
+              docker build -t brewos-cloud:latest .
+            fi
+
+            # Tag image with version
+            docker tag brewos-cloud:latest brewos-cloud:$VERSION || true
+
+            # Restart service
+            docker compose down
+            docker compose up -d
+
+            # Wait for service to be healthy
+            echo "Waiting for service to start..."
+            sleep 5
+
+            for i in 1 2 3 4 5; do
+              if curl -sf http://localhost:3001/api/health > /dev/null; then
+                echo "✓ Production service is healthy!"
+                echo "  Deployed version: ${RELEASE_VERSION}"
+                docker system prune -af --filter "until=1h" || true
+                exit 0
+              fi
+              echo "Waiting... ($i/5)"
+              sleep 3
+            done
+
+            echo "✗ Health check failed!"
+            docker compose logs --tail=50
+            exit 1
+

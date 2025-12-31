@@ -272,6 +272,20 @@ The service uses SQLite for data persistence:
 
 ---
 
+## Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+- **[Cloud Service Guide](docs/README.md)** - Complete architecture and setup documentation
+- **[Deployment Guide](docs/Deployment.md)** - Deployment instructions for various platforms
+- **[ESP32 Integration](docs/ESP32_Integration.md)** - How ESP32 devices connect to cloud
+- **[Pairing & Sharing](docs/Pairing_and_Sharing.md)** - Device pairing and sharing flows
+- **[Database Storage](docs/Database_Storage.md)** - Database schema and storage patterns
+- **[Push Notifications](docs/Push_Notifications.md)** - Push notification implementation
+- **[Latency & Performance](docs/Latency_and_Performance.md)** - Performance considerations
+
+---
+
 ## Related Repositories
 
 - **[app](https://github.com/brewos-io/app)** - Progressive Web App (served by this service)
