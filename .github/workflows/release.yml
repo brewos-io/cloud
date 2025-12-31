@@ -53,16 +53,16 @@ jobs:
             const maxWaitTime = 30 * 60 * 1000; // 30 minutes
             const pollInterval = 10 * 1000; // 10 seconds
             const startTime = Date.now();
-            
+
             console.log(`Looking for tag: ${tag} in brewos-io/app`);
-            
+
             // Get the commit SHA for the tag (with retry in case tag is being created)
             let commitSha;
             const tagWaitTime = 5 * 60 * 1000; // 5 minutes to wait for tag
             const tagPollInterval = 5 * 1000; // 5 seconds
             const tagStartTime = Date.now();
             let tagFound = false;
-            
+
             while (!tagFound && (Date.now() - tagStartTime) < tagWaitTime) {
               try {
                 const { data: ref } = await github.rest.git.getRef({
@@ -83,7 +83,7 @@ jobs:
                 }
               }
             }
-            
+
             if (!tagFound) {
               throw new Error(
                 `Tag ${tag} not found in brewos-io/app after ${tagWaitTime/1000/60} minutes. ` +
@@ -91,40 +91,143 @@ jobs:
                 `Expected tag format: app-v${tag.replace('app-v', '')}`
               );
             }
-            
+
             core.setOutput('commit_sha', commitSha);
-            
+
             // Find workflow runs for this commit
             console.log(`Looking for workflow runs for commit ${commitSha}...`);
             let workflowRun = null;
-            let attempts = 0;
             
-            while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
-              attempts++;
-              const { data: runs } = await github.rest.actions.listWorkflowRuns({
-                owner: 'brewos-io',
-                repo: 'app',
-                workflow_id: 'release.yml',
-                head_sha: commitSha,
-                per_page: 10
-              });
+            // First, try to find any existing workflow run (completed or in progress)
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: 'brewos-io',
+              repo: 'app',
+              workflow_id: 'release.yml',
+              head_sha: commitSha,
+              per_page: 20
+            });
+            
+            if (runs.workflow_runs.length > 0) {
+              // Prefer completed successful runs first
+              const completedRun = runs.workflow_runs.find(run => 
+                run.status === 'completed' && run.conclusion === 'success'
+              );
               
-              if (runs.workflow_runs.length > 0) {
-                // Find the most recent run
-                workflowRun = runs.workflow_runs[0];
-                console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, conclusion: ${workflowRun.conclusion})`);
-                break;
+              if (completedRun) {
+                workflowRun = completedRun;
+                console.log(`✓ Found completed successful workflow run: ${workflowRun.id}`);
+                console.log(`  Created: ${workflowRun.created_at}`);
+                console.log(`  Completed: ${workflowRun.updated_at}`);
+                core.setOutput('run_id', workflowRun.id);
+                return; // Exit early, no need to wait
               }
               
-              console.log(`Attempt ${attempts}: No workflow run found yet, waiting ${pollInterval/1000}s...`);
-              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              // Check for in-progress or queued runs
+              const inProgressRun = runs.workflow_runs.find(run => 
+                run.status === 'in_progress' || run.status === 'queued'
+              );
+              
+              if (inProgressRun) {
+                workflowRun = inProgressRun;
+                console.log(`Found in-progress workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
+              } else {
+                // Use most recent run (might be failed, but we'll check)
+                workflowRun = runs.workflow_runs[0];
+                console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, conclusion: ${workflowRun.conclusion})`);
+                
+                // If it's already completed but not successful, fail immediately
+                if (workflowRun.status === 'completed' && workflowRun.conclusion !== 'success') {
+                  throw new Error(`Workflow run ${workflowRun.id} completed with conclusion: ${workflowRun.conclusion}`);
+                }
+              }
             }
             
+            // If no workflow run found, the tag might be old or workflow hasn't started
             if (!workflowRun) {
-              throw new Error(`No workflow run found for commit ${commitSha} after ${maxWaitTime/1000/60} minutes`);
+              // Check when the tag was created to determine if we should wait
+              let tagDate;
+              try {
+                const { data: tagInfo } = await github.rest.repos.getTag({
+                  owner: 'brewos-io',
+                  repo: 'app',
+                  tag: tag
+                });
+                tagDate = new Date(tagInfo.tagger.date);
+              } catch (error) {
+                // If we can't get tag info, assume it's recent and wait
+                tagDate = new Date();
+              }
+              
+              const minutesSinceTag = (Date.now() - tagDate.getTime()) / (1000 * 60);
+              
+              if (minutesSinceTag > 60) {
+                // Tag is more than 1 hour old, workflow should have run by now
+                // Search all recent workflow runs (not just for this commit)
+                console.log(`Tag is ${minutesSinceTag.toFixed(0)} minutes old, searching all recent workflow runs...`);
+                const { data: allRuns } = await github.rest.actions.listWorkflowRuns({
+                  owner: 'brewos-io',
+                  repo: 'app',
+                  workflow_id: 'release.yml',
+                  per_page: 100
+                });
+                
+                // Find run that matches the tag commit
+                const matchingRun = allRuns.workflow_runs.find(run => 
+                  run.head_sha === commitSha && 
+                  run.status === 'completed' && 
+                  run.conclusion === 'success'
+                );
+                
+                if (matchingRun) {
+                  workflowRun = matchingRun;
+                  console.log(`✓ Found completed workflow run from broader search: ${workflowRun.id}`);
+                  core.setOutput('run_id', workflowRun.id);
+                  return; // Exit early
+                } else {
+                  throw new Error(
+                    `No successful workflow run found for tag ${tag} (commit ${commitSha}). ` +
+                    `Tag was created ${minutesSinceTag.toFixed(0)} minutes ago. ` +
+                    `Please ensure the app release workflow completed successfully for this tag.`
+                  );
+                }
+              } else {
+                // Tag is recent, wait for workflow to start
+                console.log(`Tag is recent (${minutesSinceTag.toFixed(0)} minutes old), waiting for workflow to start...`);
+                let attempts = 0;
+                while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
+                  attempts++;
+                  const { data: newRuns } = await github.rest.actions.listWorkflowRuns({
+                    owner: 'brewos-io',
+                    repo: 'app',
+                    workflow_id: 'release.yml',
+                    head_sha: commitSha,
+                    per_page: 10
+                  });
+                  
+                  if (newRuns.workflow_runs.length > 0) {
+                    workflowRun = newRuns.workflow_runs[0];
+                    console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
+                    break;
+                  }
+                  
+                  console.log(`Attempt ${attempts}: No workflow run found yet, waiting ${pollInterval/1000}s...`);
+                  await new Promise(resolve => setTimeout(resolve, pollInterval));
+                }
+                
+                if (!workflowRun) {
+                  throw new Error(`No workflow run found for commit ${commitSha} after ${maxWaitTime/1000/60} minutes`);
+                }
+              }
             }
             
-            // Wait for the workflow to complete
+            // If workflow is already completed successfully, use it immediately
+            if (workflowRun.status === 'completed' && workflowRun.conclusion === 'success') {
+              console.log(`✓ Workflow run ${workflowRun.id} already completed successfully!`);
+              core.setOutput('run_id', workflowRun.id);
+              return; // Exit early, no need to wait
+            }
+
+            // Wait for the workflow to complete (only if it's still running)
             console.log(`Waiting for workflow run ${workflowRun.id} to complete...`);
             while (workflowRun.status !== 'completed' && (Date.now() - startTime) < maxWaitTime) {
               await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -138,15 +241,15 @@ jobs:
               workflowRun = run;
               console.log(`Status: ${workflowRun.status}${workflowRun.conclusion ? `, conclusion: ${workflowRun.conclusion}` : ''}`);
             }
-            
+
             if (workflowRun.status !== 'completed') {
               throw new Error(`Workflow run ${workflowRun.id} did not complete within ${maxWaitTime/1000/60} minutes`);
             }
-            
+
             if (workflowRun.conclusion !== 'success') {
               throw new Error(`Workflow run ${workflowRun.id} completed with conclusion: ${workflowRun.conclusion}`);
             }
-            
+
             console.log(`✓ Workflow run ${workflowRun.id} completed successfully!`);
             core.setOutput('run_id', workflowRun.id);
 
@@ -227,13 +330,13 @@ jobs:
           command_timeout: 15m
           script: |
             set -e
-            
+
             # Clone repository if it doesn't exist
             if [ ! -d "/root/brewos-cloud" ]; then
               echo "Cloning cloud repository..."
               git clone https://github.com/brewos-io/cloud.git /root/brewos-cloud
             fi
-            
+
             cd /root/brewos-cloud
 
             # Clean up any local changes
@@ -301,4 +404,3 @@ jobs:
             echo "✗ Health check failed!"
             docker compose logs --tail=50
             exit 1
-
