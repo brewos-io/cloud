@@ -97,19 +97,40 @@ jobs:
             // Find workflow runs for this commit
             console.log(`Looking for workflow runs for commit ${commitSha}...`);
             let workflowRun = null;
-
-            // First, try to find any existing workflow run (completed or in progress)
-            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+            
+            // First, search broadly for any workflow run for this commit (completed or in progress)
+            // Search both by commit SHA and by checking recent runs
+            console.log(`Searching for workflow runs by commit SHA...`);
+            const { data: runsBySha } = await github.rest.actions.listWorkflowRuns({
               owner: 'brewos-io',
               repo: 'app',
               workflow_id: 'release.yml',
               head_sha: commitSha,
-              per_page: 20
+              per_page: 50
             });
-
-            if (runs.workflow_runs.length > 0) {
+            
+            // Also search recent workflow runs to catch any that might not be indexed by SHA yet
+            console.log(`Searching recent workflow runs...`);
+            const { data: recentRuns } = await github.rest.actions.listWorkflowRuns({
+              owner: 'brewos-io',
+              repo: 'app',
+              workflow_id: 'release.yml',
+              per_page: 100
+            });
+            
+            // Combine and deduplicate runs
+            const allRuns = [...runsBySha.workflow_runs];
+            recentRuns.workflow_runs.forEach(run => {
+              if (!allRuns.find(r => r.id === run.id) && run.head_sha === commitSha) {
+                allRuns.push(run);
+              }
+            });
+            
+            console.log(`Found ${allRuns.length} workflow run(s) for commit ${commitSha}`);
+            
+            if (allRuns.length > 0) {
               // Prefer completed successful runs first
-              const completedRun = runs.workflow_runs.find(run => 
+              const completedRun = allRuns.find(run => 
                 run.status === 'completed' && run.conclusion === 'success'
               );
               
@@ -123,7 +144,7 @@ jobs:
               }
               
               // Check for in-progress or queued runs
-              const inProgressRun = runs.workflow_runs.find(run => 
+              const inProgressRun = allRuns.find(run => 
                 run.status === 'in_progress' || run.status === 'queued'
               );
               
@@ -132,7 +153,9 @@ jobs:
                 console.log(`Found in-progress workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
               } else {
                 // Use most recent run (might be failed, but we'll check)
-                workflowRun = runs.workflow_runs[0];
+                workflowRun = allRuns.sort((a, b) => 
+                  new Date(b.created_at) - new Date(a.created_at)
+                )[0];
                 console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, conclusion: ${workflowRun.conclusion})`);
                 
                 // If it's already completed but not successful, fail immediately
@@ -141,59 +164,75 @@ jobs:
                 }
               }
             }
-
-            // If no workflow run found, the tag might be old or workflow hasn't started
+            
+            // If no workflow run found at all, wait for it to start (tag might have just been pushed)
             if (!workflowRun) {
-              // Check when the tag was created to determine if we should wait
-              let tagDate;
-              try {
-                const { data: tagInfo } = await github.rest.repos.getTag({
-                  owner: 'brewos-io',
-                  repo: 'app',
-                  tag: tag
-                });
-                tagDate = new Date(tagInfo.tagger.date);
-              } catch (error) {
-                // If we can't get tag info, assume it's recent and wait
-                tagDate = new Date();
-              }
+              console.log(`No workflow run found yet. Tag exists, so workflow should start soon...`);
+              let attempts = 0;
+              const maxInitialAttempts = 12; // Wait up to 2 minutes for workflow to start
               
-              const minutesSinceTag = (Date.now() - tagDate.getTime()) / (1000 * 60);
-              
-              if (minutesSinceTag > 60) {
-                // Tag is more than 1 hour old, workflow should have run by now
-                // Search all recent workflow runs (not just for this commit)
-                console.log(`Tag is ${minutesSinceTag.toFixed(0)} minutes old, searching all recent workflow runs...`);
-                const { data: allRuns } = await github.rest.actions.listWorkflowRuns({
+              while (!workflowRun && attempts < maxInitialAttempts && (Date.now() - startTime) < maxWaitTime) {
+                attempts++;
+                const { data: newRuns } = await github.rest.actions.listWorkflowRuns({
                   owner: 'brewos-io',
                   repo: 'app',
                   workflow_id: 'release.yml',
-                  per_page: 100
+                  head_sha: commitSha,
+                  per_page: 10
                 });
                 
-                // Find run that matches the tag commit
-                const matchingRun = allRuns.workflow_runs.find(run => 
-                  run.head_sha === commitSha && 
-                  run.status === 'completed' && 
-                  run.conclusion === 'success'
-                );
+                if (newRuns.workflow_runs.length > 0) {
+                  // Check for completed successful first
+                  const completed = newRuns.workflow_runs.find(run => 
+                    run.status === 'completed' && run.conclusion === 'success'
+                  );
+                  if (completed) {
+                    workflowRun = completed;
+                    console.log(`✓ Found completed workflow run: ${workflowRun.id}`);
+                    core.setOutput('run_id', workflowRun.id);
+                    return;
+                  }
+                  
+                  workflowRun = newRuns.workflow_runs[0];
+                  console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status})`);
+                  break;
+                }
                 
-                if (matchingRun) {
-                  workflowRun = matchingRun;
-                  console.log(`✓ Found completed workflow run from broader search: ${workflowRun.id}`);
-                  core.setOutput('run_id', workflowRun.id);
-                  return; // Exit early
-                } else {
+                console.log(`Attempt ${attempts}: No workflow run found yet, waiting ${pollInterval/1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+              }
+              
+              // If still no workflow run after initial attempts, the tag might be old
+              if (!workflowRun) {
+                // Check tag creation time
+                let tagDate;
+                try {
+                  const { data: tagInfo } = await github.rest.repos.getTag({
+                    owner: 'brewos-io',
+                    repo: 'app',
+                    tag: tag
+                  });
+                  // Try different date fields
+                  tagDate = new Date(tagInfo.tagger?.date || tagInfo.commit?.committer?.date || Date.now());
+                } catch (error) {
+                  tagDate = new Date();
+                }
+                
+                const minutesSinceTag = (Date.now() - tagDate.getTime()) / (1000 * 60);
+                console.log(`Tag age: ${minutesSinceTag.toFixed(1)} minutes`);
+                
+                if (minutesSinceTag > 10) {
+                  // Tag is more than 10 minutes old, workflow should have run by now
                   throw new Error(
-                    `No successful workflow run found for tag ${tag} (commit ${commitSha}). ` +
+                    `No workflow run found for tag ${tag} (commit ${commitSha}). ` +
                     `Tag was created ${minutesSinceTag.toFixed(0)} minutes ago. ` +
-                    `Please ensure the app release workflow completed successfully for this tag.`
+                    `The app release workflow may not have been triggered. ` +
+                    `Please check if the workflow exists and is configured to run on tag pushes.`
                   );
                 }
-              } else {
-                // Tag is recent, wait for workflow to start
-                console.log(`Tag is recent (${minutesSinceTag.toFixed(0)} minutes old), waiting for workflow to start...`);
-                let attempts = 0;
+                
+                // Continue waiting if tag is recent
+                console.log(`Tag is recent, continuing to wait for workflow to start...`);
                 while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
                   attempts++;
                   const { data: newRuns } = await github.rest.actions.listWorkflowRuns({
@@ -219,7 +258,7 @@ jobs:
                 }
               }
             }
-
+            
             // If workflow is already completed successfully, use it immediately
             if (workflowRun.status === 'completed' && workflowRun.conclusion === 'success') {
               console.log(`✓ Workflow run ${workflowRun.id} already completed successfully!`);
