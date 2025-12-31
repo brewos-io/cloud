@@ -95,11 +95,10 @@ jobs:
             core.setOutput('commit_sha', commitSha);
 
             // Find workflow runs for this commit
-            console.log(`Looking for workflow runs for commit ${commitSha}...`);
+            console.log(`Looking for workflow runs for commit ${commitSha} (tag: ${tag})...`);
             let workflowRun = null;
 
-            // First, search broadly for any workflow run for this commit (completed or in progress)
-            // Search both by commit SHA and by checking recent runs
+            // Search by commit SHA
             console.log(`Searching for workflow runs by commit SHA...`);
             const { data: runsBySha } = await github.rest.actions.listWorkflowRuns({
               owner: 'brewos-io',
@@ -108,25 +107,71 @@ jobs:
               head_sha: commitSha,
               per_page: 50
             });
+            console.log(`Found ${runsBySha.workflow_runs.length} run(s) by commit SHA`);
 
-            // Also search recent workflow runs to catch any that might not be indexed by SHA yet
+            // Search by tag ref (workflows triggered by tag push use the tag as head_branch)
+            console.log(`Searching for workflow runs by tag ref...`);
+            let runsByTag = { workflow_runs: [] };
+            try {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: 'brewos-io',
+                repo: 'app',
+                workflow_id: 'release.yml',
+                ref: tag,
+                per_page: 50
+              });
+              runsByTag = data;
+              console.log(`Found ${runsByTag.workflow_runs.length} run(s) by tag ref`);
+            } catch (error) {
+              console.log(`Could not search by tag ref: ${error.message}`);
+            }
+
+            // Search recent workflow runs to catch any that might not be indexed yet
             console.log(`Searching recent workflow runs...`);
             const { data: recentRuns } = await github.rest.actions.listWorkflowRuns({
               owner: 'brewos-io',
               repo: 'app',
               workflow_id: 'release.yml',
-              per_page: 100
+              per_page: 200 // Increased to catch older runs
             });
+            console.log(`Found ${recentRuns.workflow_runs.length} recent workflow run(s)`);
 
-            // Combine and deduplicate runs
+            // Combine and deduplicate runs - match by commit SHA
             const allRuns = [...runsBySha.workflow_runs];
+            
+            // Add runs from tag search
+            runsByTag.workflow_runs.forEach(run => {
+              if (!allRuns.find(r => r.id === run.id)) {
+                allRuns.push(run);
+              }
+            });
+            
+            // Add runs from recent search that match commit SHA
             recentRuns.workflow_runs.forEach(run => {
               if (!allRuns.find(r => r.id === run.id) && run.head_sha === commitSha) {
                 allRuns.push(run);
               }
             });
 
-            console.log(`Found ${allRuns.length} workflow run(s) for commit ${commitSha}`);
+            // Also check if any recent run matches the tag name in head_branch or head_ref
+            recentRuns.workflow_runs.forEach(run => {
+              if (!allRuns.find(r => r.id === run.id)) {
+                // Check if run was triggered by this tag
+                if (run.head_branch === tag || run.head_ref === tag || 
+                    (run.head_branch && run.head_branch.includes(tag.replace('app-', ''))) ||
+                    run.head_sha === commitSha) {
+                  allRuns.push(run);
+                }
+              }
+            });
+
+            console.log(`Total unique workflow run(s) found: ${allRuns.length}`);
+            if (allRuns.length > 0) {
+              console.log(`Run details:`);
+              allRuns.forEach(run => {
+                console.log(`  - Run ${run.id}: status=${run.status}, conclusion=${run.conclusion}, head_sha=${run.head_sha}, head_branch=${run.head_branch}, head_ref=${run.head_ref}`);
+              });
+            }
 
             if (allRuns.length > 0) {
               // Prefer completed successful runs first
