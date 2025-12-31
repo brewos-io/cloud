@@ -11,11 +11,10 @@ import {
   RefreshCw,
   Play,
   Pause,
-  Filter,
   X,
 } from "lucide-react";
 import { api, ApiError } from "../lib/api";
-import type { LogEntry, LogLevel, LogSourcesResponse, LogStats } from "../lib/types";
+import type { LogEntry, LogLevel, LogStats } from "../lib/types";
 
 const POLL_INTERVAL_MS = 2000; // Poll every 2 seconds for new logs
 const MAX_LOGS_DISPLAY = 1000; // Max logs to display in UI
@@ -121,7 +120,8 @@ export function Logs() {
     if (!logsContainerRef.current) return;
     const container = logsContainerRef.current;
     const isAtBottom =
-      container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+      container.scrollHeight - container.scrollTop <=
+      container.clientHeight + 100;
     setAutoScroll(isAtBottom);
   };
 
@@ -133,7 +133,9 @@ export function Logs() {
     const content = filteredLogs
       .map(
         (log) =>
-          `[${new Date(log.timestamp).toISOString()}] [${log.level.toUpperCase()}] ${
+          `[${new Date(
+            log.timestamp
+          ).toISOString()}] [${log.level.toUpperCase()}] ${
             log.source ? `[${log.source}]` : ""
           } ${log.message}`
       )
@@ -152,7 +154,11 @@ export function Logs() {
 
   // Clear logs
   const handleClearLogs = async () => {
-    if (!confirm("Are you sure you want to clear all logs? This cannot be undone.")) {
+    if (
+      !confirm(
+        "Are you sure you want to clear all logs? This cannot be undone."
+      )
+    ) {
       return;
     }
 
@@ -252,7 +258,9 @@ export function Logs() {
               className="admin-button flex items-center gap-2"
               disabled={loading}
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+              />
               Refresh
             </button>
             <button
@@ -278,7 +286,9 @@ export function Logs() {
           <div className="flex flex-wrap gap-4 text-sm">
             <div className="bg-admin-surface border border-admin-border rounded-lg px-3 py-2">
               <span className="text-admin-text-secondary">Total: </span>
-              <span className="font-medium text-admin-text">{stats.total.toLocaleString()}</span>
+              <span className="font-medium text-admin-text">
+                {stats.total.toLocaleString()}
+              </span>
             </div>
             <div className="bg-admin-surface border border-admin-border rounded-lg px-3 py-2">
               <span className="text-admin-text-secondary">Errors: </span>
@@ -362,7 +372,9 @@ export function Logs() {
               Loading logs...
             </div>
           ) : filteredLogs.length === 0 ? (
-            <p className="text-admin-text-secondary text-center py-8">No logs to display</p>
+            <p className="text-admin-text-secondary text-center py-8">
+              No logs to display
+            </p>
           ) : (
             <>
               {filteredLogs.map((log) => (
@@ -379,7 +391,9 @@ export function Logs() {
                       [{log.source}]
                     </span>
                   )}
-                  <span className={`flex-1 ${getLevelClass(log.level)} break-words`}>
+                  <span
+                    className={`flex-1 ${getLevelClass(log.level)} break-words`}
+                  >
                     {log.message}
                   </span>
                 </div>
@@ -397,7 +411,8 @@ export function Logs() {
               )}
               {filteredLogs.length >= MAX_LOGS_DISPLAY && (
                 <div className="text-center py-4 text-admin-text-secondary text-sm">
-                  Showing first {MAX_LOGS_DISPLAY} logs. Use filters to narrow results.
+                  Showing first {MAX_LOGS_DISPLAY} logs. Use filters to narrow
+                  results.
                 </div>
               )}
               <div ref={logsEndRef} />
