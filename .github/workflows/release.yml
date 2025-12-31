@@ -39,7 +39,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           VERSION_NUM="${VERSION#cloud-v}"
           echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
-          APP_VERSION="app-${VERSION_NUM}"
+          APP_VERSION="app-v${VERSION_NUM}"
           echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
 
       - name: Get App Commit SHA and Wait for Workflow
