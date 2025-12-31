@@ -56,18 +56,40 @@ jobs:
             
             console.log(`Looking for tag: ${tag} in brewos-io/app`);
             
-            // Get the commit SHA for the tag
+            // Get the commit SHA for the tag (with retry in case tag is being created)
             let commitSha;
-            try {
-              const { data: ref } = await github.rest.git.getRef({
-                owner: 'brewos-io',
-                repo: 'app',
-                ref: `tags/${tag}`
-              });
-              commitSha = ref.object.sha;
-              console.log(`Tag ${tag} points to commit: ${commitSha}`);
-            } catch (error) {
-              throw new Error(`Tag ${tag} not found in brewos-io/app: ${error.message}`);
+            const tagWaitTime = 5 * 60 * 1000; // 5 minutes to wait for tag
+            const tagPollInterval = 5 * 1000; // 5 seconds
+            const tagStartTime = Date.now();
+            let tagFound = false;
+            
+            while (!tagFound && (Date.now() - tagStartTime) < tagWaitTime) {
+              try {
+                const { data: ref } = await github.rest.git.getRef({
+                  owner: 'brewos-io',
+                  repo: 'app',
+                  ref: `tags/${tag}`
+                });
+                commitSha = ref.object.sha;
+                console.log(`✓ Tag ${tag} found! Points to commit: ${commitSha}`);
+                tagFound = true;
+              } catch (error) {
+                if (error.status === 404) {
+                  const elapsed = Math.floor((Date.now() - tagStartTime) / 1000);
+                  console.log(`Tag ${tag} not found yet, waiting... (${elapsed}s elapsed)`);
+                  await new Promise(resolve => setTimeout(resolve, tagPollInterval));
+                } else {
+                  throw new Error(`Error checking for tag ${tag} in brewos-io/app: ${error.message}`);
+                }
+              }
+            }
+            
+            if (!tagFound) {
+              throw new Error(
+                `Tag ${tag} not found in brewos-io/app after ${tagWaitTime/1000/60} minutes. ` +
+                `Please ensure the app tag is created before deploying cloud. ` +
+                `Expected tag format: app-v${tag.replace('app-v', '')}`
+              );
             }
             
             core.setOutput('commit_sha', commitSha);
