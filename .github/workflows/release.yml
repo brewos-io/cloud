@@ -42,35 +42,91 @@ jobs:
           APP_VERSION="app-${VERSION_NUM}"
           echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Wait for App Workflow
-        uses: lewagon/wait-on-check-action@v1.3.4
-        id: wait
-        with:
-          ref: ${{ steps.version.outputs.app_version }}
-          repo: brewos-io/app
-          check-name: 'Build App'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
-
-      - name: Get App Commit SHA
-        id: get-sha
+      - name: Get App Commit SHA and Wait for Workflow
+        id: wait-for-app
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const tag = '${{ steps.version.outputs.app_version }}';
+            const checkName = 'Build App';
+            const maxWaitTime = 30 * 60 * 1000; // 30 minutes
+            const pollInterval = 10 * 1000; // 10 seconds
+            const startTime = Date.now();
+            
+            console.log(`Looking for tag: ${tag} in brewos-io/app`);
             
             // Get the commit SHA for the tag
-            const { data: ref } = await github.rest.git.getRef({
-              owner: 'brewos-io',
-              repo: 'app',
-              ref: `tags/${tag}`
-            });
+            let commitSha;
+            try {
+              const { data: ref } = await github.rest.git.getRef({
+                owner: 'brewos-io',
+                repo: 'app',
+                ref: `tags/${tag}`
+              });
+              commitSha = ref.object.sha;
+              console.log(`Tag ${tag} points to commit: ${commitSha}`);
+            } catch (error) {
+              throw new Error(`Tag ${tag} not found in brewos-io/app: ${error.message}`);
+            }
             
-            const commitSha = ref.object.sha;
-            console.log(`Tag ${tag} points to commit: ${commitSha}`);
             core.setOutput('commit_sha', commitSha);
+            
+            // Find workflow runs for this commit
+            console.log(`Looking for workflow runs for commit ${commitSha}...`);
+            let workflowRun = null;
+            let attempts = 0;
+            
+            while (!workflowRun && (Date.now() - startTime) < maxWaitTime) {
+              attempts++;
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                owner: 'brewos-io',
+                repo: 'app',
+                workflow_id: 'release.yml',
+                head_sha: commitSha,
+                per_page: 10
+              });
+              
+              if (runs.workflow_runs.length > 0) {
+                // Find the most recent run
+                workflowRun = runs.workflow_runs[0];
+                console.log(`Found workflow run: ${workflowRun.id} (status: ${workflowRun.status}, conclusion: ${workflowRun.conclusion})`);
+                break;
+              }
+              
+              console.log(`Attempt ${attempts}: No workflow run found yet, waiting ${pollInterval/1000}s...`);
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+            }
+            
+            if (!workflowRun) {
+              throw new Error(`No workflow run found for commit ${commitSha} after ${maxWaitTime/1000/60} minutes`);
+            }
+            
+            // Wait for the workflow to complete
+            console.log(`Waiting for workflow run ${workflowRun.id} to complete...`);
+            while (workflowRun.status !== 'completed' && (Date.now() - startTime) < maxWaitTime) {
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              
+              const { data: run } = await github.rest.actions.getWorkflowRun({
+                owner: 'brewos-io',
+                repo: 'app',
+                run_id: workflowRun.id
+              });
+              
+              workflowRun = run;
+              console.log(`Status: ${workflowRun.status}${workflowRun.conclusion ? `, conclusion: ${workflowRun.conclusion}` : ''}`);
+            }
+            
+            if (workflowRun.status !== 'completed') {
+              throw new Error(`Workflow run ${workflowRun.id} did not complete within ${maxWaitTime/1000/60} minutes`);
+            }
+            
+            if (workflowRun.conclusion !== 'success') {
+              throw new Error(`Workflow run ${workflowRun.id} completed with conclusion: ${workflowRun.conclusion}`);
+            }
+            
+            console.log(`✓ Workflow run ${workflowRun.id} completed successfully!`);
+            core.setOutput('run_id', workflowRun.id);
 
       - name: Download App Artifact
         uses: dawidd6/action-download-artifact@v3
@@ -78,7 +134,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: release.yml
           workflow_conclusion: success
-          commit: ${{ steps.get-sha.outputs.commit_sha }}
+          run_id: ${{ steps.wait-for-app.outputs.run_id }}
           name: app-cloud-${{ steps.version.outputs.app_version }}
           path: app-build
           repo: brewos-io/app
