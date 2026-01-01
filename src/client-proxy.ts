@@ -74,6 +74,22 @@ interface PendingMessage {
  * - Connection quality metrics
  * - Graceful token refresh support
  */
+// State messages to cache for instant loading
+const CACHED_MESSAGE_TYPES = new Set([
+  "status",
+  "device_info",
+  "esp_status",
+  "pico_status",
+]);
+
+interface DeviceStateCache {
+  status?: DeviceMessage;
+  device_info?: DeviceMessage;
+  esp_status?: DeviceMessage;
+  pico_status?: DeviceMessage;
+  lastUpdated: number;
+}
+
 export class ClientProxy {
   private clients = new Map<string, ClientConnection>();
   private deviceClients = new Map<string, Set<string>>(); // deviceId -> sessionIds
@@ -81,6 +97,7 @@ export class ClientProxy {
   private pingInterval: NodeJS.Timeout | null = null;
   private pendingMessages = new Map<string, PendingMessage[]>(); // deviceId -> messages
   private messageQueueCleanupInterval: NodeJS.Timeout | null = null;
+  private deviceStateCache = new Map<string, DeviceStateCache>(); // deviceId -> cached state
 
   // Global metrics
   private totalConnections = 0;
@@ -94,6 +111,12 @@ export class ClientProxy {
 
     // Subscribe to device messages
     deviceRelay.onDeviceMessage((deviceId, message) => {
+      // Update state cache for relevant message types
+      if (CACHED_MESSAGE_TYPES.has(message.type)) {
+        this.updateStateCache(deviceId, message);
+      }
+      
+      // Broadcast to clients
       this.broadcastToDeviceClients(deviceId, message);
     });
 
@@ -101,6 +124,13 @@ export class ClientProxy {
     deviceRelay.onDeviceMessage((deviceId, message) => {
       if (message.type === "device_online") {
         this.flushPendingMessages(deviceId);
+      }
+    });
+
+    // Subscribe to device offline events to clear cache
+    deviceRelay.onDeviceMessage((deviceId, message) => {
+      if (message.type === "device_offline") {
+        this.clearStateCache(deviceId);
       }
     });
 
@@ -243,11 +273,32 @@ export class ClientProxy {
       timestamp: Date.now(),
     });
 
-    // Request device to send full state if online
-    // This ensures the browser client gets state even if it connects after device
+    // Send cached state immediately if available (for instant loading)
+    const cachedState = this.deviceStateCache.get(deviceId);
+    if (cachedState && deviceOnline) {
+      console.log(
+        `[Client] Sending cached state to new client ${sessionId} for device ${deviceId}`
+      );
+      
+      // Send all cached state messages in order of importance
+      if (cachedState.status) {
+        this.sendToClient(connection, cachedState.status);
+      }
+      if (cachedState.device_info) {
+        this.sendToClient(connection, cachedState.device_info);
+      }
+      if (cachedState.esp_status) {
+        this.sendToClient(connection, cachedState.esp_status);
+      }
+      if (cachedState.pico_status) {
+        this.sendToClient(connection, cachedState.pico_status);
+      }
+    }
+
+    // Request device to send full state if online (for any updates since cache)
     if (deviceOnline) {
       console.log(
-        `[Client] Requesting state from device ${deviceId} for new client ${sessionId}`
+        `[Client] Requesting fresh state from device ${deviceId} for new client ${sessionId}`
       );
       this.deviceRelay.sendToDevice(deviceId, {
         type: "request_state",
@@ -579,6 +630,44 @@ export class ClientProxy {
       clearTimeout(client.tokenExpiryTimer);
     }
     this.unregisterClient(client);
+  }
+
+  // =============================================================================
+  // State Caching
+  // =============================================================================
+
+  /**
+   * Update state cache for a device
+   */
+  private updateStateCache(deviceId: string, message: DeviceMessage): void {
+    if (!this.deviceStateCache.has(deviceId)) {
+      this.deviceStateCache.set(deviceId, {
+        lastUpdated: Date.now(),
+      });
+    }
+
+    const cache = this.deviceStateCache.get(deviceId)!;
+    
+    // Store message by type
+    if (message.type === "status") {
+      cache.status = message;
+    } else if (message.type === "device_info") {
+      cache.device_info = message;
+    } else if (message.type === "esp_status") {
+      cache.esp_status = message;
+    } else if (message.type === "pico_status") {
+      cache.pico_status = message;
+    }
+    
+    cache.lastUpdated = Date.now();
+  }
+
+  /**
+   * Clear state cache for a device (when device disconnects)
+   */
+  private clearStateCache(deviceId: string): void {
+    this.deviceStateCache.delete(deviceId);
+    console.log(`[Client] Cleared state cache for device ${deviceId}`);
   }
 
   // =============================================================================
