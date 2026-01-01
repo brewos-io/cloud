@@ -8,7 +8,7 @@ For a fresh Ubuntu/Debian server, use the automated setup script:
 
 ```bash
 # SSH into your server, then run:
-curl -sSL https://raw.githubusercontent.com/mizrachiran/brewos/main/scripts/setup-server.sh | \
+curl -sSL https://raw.githubusercontent.com/brewos-io/cloud/main/scripts/setup-server.sh | \
   bash -s -- \
     --domain cloud.example.com \
     --google-client-id "your-google-client-id.apps.googleusercontent.com" \

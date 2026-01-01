@@ -6,7 +6,7 @@
 # to run the BrewOS cloud service.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/mizrachiran/brewos/main/scripts/setup-server.sh | bash -s -- \
+#   curl -sSL https://raw.githubusercontent.com/brewos-io/cloud/main/scripts/setup-server.sh | bash -s -- \
 #     --domain cloud.brewos.io \
 #     --google-client-id "your-google-client-id.apps.googleusercontent.com" \
 #     --email "admin@brewos.io"
@@ -34,7 +34,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 DOMAIN=""
 GOOGLE_CLIENT_ID=""
 ADMIN_EMAIL=""
-REPO_URL="https://github.com/mizrachiran/brewos.git"
+REPO_URL="https://github.com/brewos-io/cloud.git"
 INSTALL_DIR="/root/brewos"
 DATA_DIR="/data"
 ENVIRONMENT="production"
