@@ -75,8 +75,11 @@ interface PendingMessage {
  * - Graceful token refresh support
  */
 // State messages to cache for instant loading
+// Note: status_delta messages update the cache but aren't cached directly
+// (they're applied to the full status cache entry)
 const CACHED_MESSAGE_TYPES = new Set([
   "status",
+  "status_delta", // Delta updates should refresh cache timestamp
   "device_info",
   "esp_status",
   "pico_status",
@@ -275,9 +278,14 @@ export class ClientProxy {
 
     // Send cached state immediately if available (for instant loading)
     const cachedState = this.deviceStateCache.get(deviceId);
+    const CACHE_STALE_THRESHOLD_MS = 10000; // 10 seconds - consider cache stale after this
+    
     if (cachedState && deviceOnline) {
+      const cacheAge = Date.now() - cachedState.lastUpdated;
+      const isCacheStale = cacheAge > CACHE_STALE_THRESHOLD_MS;
+      
       console.log(
-        `[Client] Sending cached state to new client ${sessionId} for device ${deviceId}`
+        `[Client] Sending cached state to new client ${sessionId} for device ${deviceId} (age: ${Math.round(cacheAge / 1000)}s)`
       );
       
       // Send all cached state messages in order of importance
@@ -293,12 +301,27 @@ export class ClientProxy {
       if (cachedState.pico_status) {
         this.sendToClient(connection, cachedState.pico_status);
       }
-    }
-
-    // Request device to send full state if online (for any updates since cache)
-    if (deviceOnline) {
+      
+      // Only request fresh state if cache is stale (older than threshold)
+      // This prevents unnecessary state requests when cache is recent
+      // The device's normal status updates (every 500ms) will keep state fresh
+      if (isCacheStale) {
+        console.log(
+          `[Client] Cache is stale (${Math.round(cacheAge / 1000)}s old) - requesting fresh state from device ${deviceId} for client ${sessionId}`
+        );
+        this.deviceRelay.sendToDevice(deviceId, {
+          type: "request_state",
+          timestamp: Date.now(),
+        });
+      } else {
+        console.log(
+          `[Client] Cache is fresh (${Math.round(cacheAge / 1000)}s old) - using cached state, device will send updates via normal status stream`
+        );
+      }
+    } else if (deviceOnline) {
+      // No cache available - request full state
       console.log(
-        `[Client] Requesting fresh state from device ${deviceId} for new client ${sessionId}`
+        `[Client] No cached state available - requesting full state from device ${deviceId} for new client ${sessionId}`
       );
       this.deviceRelay.sendToDevice(deviceId, {
         type: "request_state",
@@ -638,6 +661,10 @@ export class ClientProxy {
 
   /**
    * Update state cache for a device
+   * 
+   * Note: status_delta messages refresh the cache timestamp but don't replace
+   * the full status cache (deltas are applied client-side).
+   * Only full "status" messages replace the cached status.
    */
   private updateStateCache(deviceId: string, message: DeviceMessage): void {
     if (!this.deviceStateCache.has(deviceId)) {
@@ -650,16 +677,23 @@ export class ClientProxy {
     
     // Store message by type
     if (message.type === "status") {
+      // Full status message - replace cache
       cache.status = message;
+      cache.lastUpdated = Date.now();
+    } else if (message.type === "status_delta") {
+      // Delta update - refresh cache timestamp but keep existing status
+      // (delta is applied client-side, we just track that state is fresh)
+      cache.lastUpdated = Date.now();
     } else if (message.type === "device_info") {
       cache.device_info = message;
+      cache.lastUpdated = Date.now();
     } else if (message.type === "esp_status") {
       cache.esp_status = message;
+      cache.lastUpdated = Date.now();
     } else if (message.type === "pico_status") {
       cache.pico_status = message;
+      cache.lastUpdated = Date.now();
     }
-    
-    cache.lastUpdated = Date.now();
   }
 
   /**
