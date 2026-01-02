@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { IncomingMessage } from "http";
-import { decode } from "@msgpack/msgpack";
+import { decode, decodeMulti } from "@msgpack/msgpack";
 import type { DeviceMessage } from "./types.js";
 import {
   verifyDeviceKey,
@@ -173,24 +173,40 @@ export class DeviceRelay {
         // Check if message is binary (MessagePack) or text (legacy JSON)
         if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
           // Binary MessagePack format
+          // Device may send multiple messages in one frame, so try decodeMulti first
+          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          const uint8Array = new Uint8Array(buffer);
+
+          // Try to decode multiple messages first (device may send multiple in one frame)
+          // decodeMulti works for both single and multiple messages
           try {
-            const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-            const uint8Array = new Uint8Array(buffer);
+            const messages = Array.from(decodeMulti(uint8Array));
+
+            if (messages.length > 0) {
+              // Process each message
+              for (const msg of messages) {
+                this.handleDeviceMessage(deviceId, msg as DeviceMessage);
+              }
+              return; // Successfully processed all messages
+            }
+            // If decodeMulti returned empty array, fall through to single decode
+          } catch {
+            // decodeMulti failed - might be malformed or single message format issue
+            // Fall through to single decode as fallback
+          }
+
+          // Fallback: try single decode (for single messages or if decodeMulti failed)
+          try {
             message = decode(uint8Array) as DeviceMessage;
-          } catch (decodeError) {
+          } catch (singleDecodeError) {
             console.error(
               `[Device] MessagePack decode failed for ${deviceId}:`,
-              decodeError,
-              `Buffer length: ${
-                data instanceof ArrayBuffer
-                  ? data.byteLength
-                  : Buffer.isBuffer(data)
-                  ? data.length
-                  : "unknown"
-              }`
+              singleDecodeError instanceof Error
+                ? singleDecodeError.message
+                : singleDecodeError,
+              `Buffer length: ${buffer.length}`
             );
-            // Don't process invalid messages
-            return;
+            return; // Don't process invalid messages
           }
         } else {
           // Legacy text/JSON format
