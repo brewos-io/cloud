@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { IncomingMessage } from "http";
-import { decode, decodeMulti, Decoder } from "@msgpack/msgpack";
+import { decodeMulti } from "@msgpack/msgpack";
 import type { DeviceMessage } from "./types.js";
 import {
   verifyDeviceKey,
@@ -95,6 +95,35 @@ export class DeviceRelay {
     });
   }
 
+  /**
+   * Decode binary MessagePack messages
+   * Handles both single and multiple messages in a single frame
+   */
+  private decodeBinaryMessage(
+    data: Buffer | ArrayBuffer | Buffer[]
+  ): DeviceMessage[] {
+    const buffer = Buffer.isBuffer(data)
+      ? data
+      : Array.isArray(data)
+      ? Buffer.concat(data)
+      : Buffer.from(data as any);
+
+    const uint8Array = new Uint8Array(buffer);
+    const messages: DeviceMessage[] = [];
+
+    try {
+      // decodeMulti handles both single and multiple messages
+      for (const msg of decodeMulti(uint8Array)) {
+        messages.push(msg as DeviceMessage);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[Device] MessagePack decode failed: ${errorMsg}`);
+    }
+
+    return messages;
+  }
+
   private handleConnection(ws: WebSocket, req: IncomingMessage): void {
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const deviceId = url.searchParams.get("id");
@@ -135,8 +164,13 @@ export class DeviceRelay {
     // Close existing connection for this device (if any)
     const existing = this.devices.get(deviceId);
     if (existing) {
-      console.log(`[Device] Replacing connection for ${deviceId}`);
-      existing.ws.close(4002, "Replaced by new connection");
+      // Check if the existing connection is actually open before forcing close
+      if (existing.ws.readyState === WebSocket.OPEN) {
+        console.log(`[Device] Replacing active connection for ${deviceId}`);
+        existing.ws.close(4002, "Replaced by new connection");
+      }
+      // Remove immediately to prevent race conditions during the close handshake
+      this.devices.delete(deviceId);
     }
 
     const connection: DeviceConnection = {
@@ -164,155 +198,54 @@ export class DeviceRelay {
     }
 
     // Handle messages from device
-    ws.on("message", async (data: RawData, isBinary: boolean) => {
+    ws.on("message", (data: RawData, isBinary: boolean) => {
       connection.lastSeen = new Date();
       connection.missedPings = 0; // Any message means device is alive
-      try {
-        let message: DeviceMessage | null = null;
 
-        // Check if message is binary (MessagePack) or text (JSON)
-        // Use isBinary flag from ws library to correctly distinguish frame types
-        // Text frames (JSON) are sent for logs/events, Binary frames (MessagePack) for status updates
+      try {
         if (isBinary) {
           // Binary MessagePack format
-          // Device may send multiple messages in one frame, so try decodeMulti first
-          let buffer: Buffer;
-          if (Buffer.isBuffer(data)) {
-            buffer = data;
-          } else if (data instanceof ArrayBuffer) {
-            buffer = Buffer.from(new Uint8Array(data));
-          } else if (Array.isArray(data)) {
-            buffer = Buffer.concat(data);
-          } else {
-            buffer = Buffer.from(data as any);
-          }
-          const uint8Array = new Uint8Array(buffer);
-
-          // Try to decode multiple messages first (device may send multiple in one frame)
-          // decodeMulti works for both single and multiple messages
-          let decodeMultiSucceeded = false;
-          try {
-            const messages = Array.from(decodeMulti(uint8Array));
-
-            if (messages.length > 0) {
-              // Process each message
-              for (const msg of messages) {
-                this.handleDeviceMessage(deviceId, msg as DeviceMessage);
-              }
-              decodeMultiSucceeded = true;
-              return; // Successfully processed all messages
-            }
-            // If decodeMulti returned empty array, fall through to single decode
-          } catch (multiError) {
-            // decodeMulti failed - try Decoder instance as alternative
-            try {
-              const decoder = new Decoder();
-              const messages: DeviceMessage[] = [];
-              for (const msg of decoder.decodeMulti(uint8Array)) {
-                messages.push(msg as DeviceMessage);
-              }
-
-              if (messages.length > 0) {
-                // Process each message
-                for (const msg of messages) {
-                  this.handleDeviceMessage(deviceId, msg);
-                }
-                decodeMultiSucceeded = true;
-                return; // Successfully processed all messages
-              }
-            } catch (decoderError) {
-              // Both decodeMulti and Decoder failed - log for debugging
-              const errorMsg =
-                multiError instanceof Error
-                  ? multiError.message
-                  : String(multiError);
-              const decoderErrorMsg =
-                decoderError instanceof Error
-                  ? decoderError.message
-                  : String(decoderError);
-              // Only log if it's not the expected "extra bytes" error
-              if (
-                !errorMsg.includes("Extra") &&
-                !errorMsg.includes("extra") &&
-                !decoderErrorMsg.includes("Extra") &&
-                !decoderErrorMsg.includes("extra")
-              ) {
-                console.warn(
-                  `[Device] Both decodeMulti methods failed for ${deviceId}, trying single decode:`,
-                  `decodeMulti: ${errorMsg}, Decoder: ${decoderErrorMsg}`
-                );
-              }
-            }
-          }
-
-          // Fallback: try single decode (for single messages or if decodeMulti failed)
-          // Only try if decodeMulti didn't succeed
-          if (!decodeMultiSucceeded) {
-            try {
-              message = decode(uint8Array) as DeviceMessage;
-            } catch (singleDecodeError) {
-              const errorMsg =
-                singleDecodeError instanceof Error
-                  ? singleDecodeError.message
-                  : String(singleDecodeError);
-
-              // If single decode also fails with "Extra bytes", it means there are multiple messages
-              // but decodeMulti didn't handle them - this shouldn't happen but log it
-              if (errorMsg.includes("Extra") || errorMsg.includes("extra")) {
-                console.error(
-                  `[Device] MessagePack decode failed for ${deviceId}: Multiple messages detected but decodeMulti failed.`,
-                  `Buffer length: ${buffer.length}, Error: ${errorMsg}`
-                );
-              } else {
-                console.error(
-                  `[Device] MessagePack decode failed for ${deviceId}:`,
-                  errorMsg,
-                  `Buffer length: ${buffer.length}`
-                );
-              }
-              return; // Don't process invalid messages
-            }
+          // Device may send multiple messages in one frame
+          const messages = this.decodeBinaryMessage(data);
+          for (const msg of messages) {
+            this.handleDeviceMessage(deviceId, msg);
           }
         } else {
           // Legacy text/JSON format
-          try {
-            const text = data.toString();
-            message = JSON.parse(text) as DeviceMessage;
-          } catch (parseError) {
-            console.error(
-              `[Device] JSON parse failed for ${deviceId}:`,
-              parseError,
-              `Data: ${data.toString().substring(0, 100)}`
-            );
-            return;
-          }
-        }
-
-        if (message) {
+          // Explicitly specify utf-8 to avoid issues with system default encodings
+          const text = data.toString("utf-8");
+          const message = JSON.parse(text) as DeviceMessage;
           this.handleDeviceMessage(deviceId, message);
         }
       } catch (err) {
-        console.error(`[Device] Invalid message from ${deviceId}:`, err);
+        console.error(`[Device] Message error from ${deviceId}:`, err);
       }
     });
 
     // Handle disconnect
     ws.on("close", (code: number, reason: Buffer) => {
-      this.devices.delete(deviceId);
-      const reasonStr = reason ? reason.toString() : "no reason";
-      console.log(
-        `[Device] Disconnected: ${deviceId} (code: ${code}, reason: ${reasonStr})`
-      );
+      // Only remove if it's strictly THE connection that closed (handles race conditions)
+      const current = this.devices.get(deviceId);
+      if (current === connection) {
+        this.devices.delete(deviceId);
+        const reasonStr = reason ? reason.toString() : "no reason";
+        console.log(
+          `[Device] Disconnected: ${deviceId} (code: ${code}, reason: ${reasonStr})`
+        );
 
-      // Update device offline status in database
-      try {
-        updateDeviceStatus(deviceId, false);
-      } catch (err) {
-        console.error(`[Device] Failed to update status for ${deviceId}:`, err);
+        // Update device offline status in database
+        try {
+          updateDeviceStatus(deviceId, false);
+        } catch (err) {
+          console.error(
+            `[Device] Failed to update status for ${deviceId}:`,
+            err
+          );
+        }
+
+        // Notify handlers of disconnect
+        this.notifyHandlers(deviceId, { type: "device_offline" });
       }
-
-      // Notify handlers of disconnect
-      this.notifyHandlers(deviceId, { type: "device_offline" });
     });
 
     ws.on("error", (err) => {
