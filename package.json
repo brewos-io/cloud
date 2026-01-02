@@ -1,6 +1,6 @@
 {
   "name": "@brewos/cloud",
-  "version": "0.8.20",
+  "version": "0.8.21",
   "description": "BrewOS Cloud Service - WebSocket relay for remote device access",
   "type": "module",
   "scripts": {
