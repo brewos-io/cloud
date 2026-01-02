@@ -1,6 +1,7 @@
-# Deploy to STAGING on push to main
+# Deploy to STAGING on push to main (cloud changes) or repository_dispatch (app changes)
 # Production deploys happen via release.yml when a version tag is pushed
 # Updated: Added VITE_GOOGLE_CLIENT_ID support in app CI workflow
+# Updated: Added repository_dispatch trigger to allow app repo to trigger staging deployment
 name: "Main → Deploy to Staging"
 
 on:
@@ -11,6 +12,8 @@ on:
       - "admin/**"
       - "package.json"
       - ".github/workflows/deploy-staging.yml"
+  repository_dispatch:
+    types: [deploy-staging]
 
 # Only allow one deploy at a time - cancel older runs
 concurrency:
@@ -21,10 +24,17 @@ jobs:
   build-check:
     name: Verify Build
     runs-on: ubuntu-latest
+    # Only run build steps if triggered by push to cloud repo (cloud code changed)
     steps:
+      - name: Skip if triggered by app repo
+        if: github.event_name != 'push'
+        run: echo "Skipping build check - triggered by app repo, only app changed"
+
       - uses: actions/checkout@v6
+        if: github.event_name == 'push'
 
       - name: Setup Node.js
+        if: github.event_name == 'push'
         uses: actions/setup-node@v6
         with:
           node-version: "20"
@@ -34,19 +44,24 @@ jobs:
             admin/package-lock.json
 
       - name: Install Dependencies
+        if: github.event_name == 'push'
         run: npm ci
 
       - name: Type Check
+        if: github.event_name == 'push'
         run: npx tsc --noEmit
 
       - name: Build Cloud Service
+        if: github.event_name == 'push'
         run: npm run build
 
       - name: Install Admin Dependencies
+        if: github.event_name == 'push'
         working-directory: admin
         run: npm ci
 
       - name: Build Admin UI
+        if: github.event_name == 'push'
         working-directory: admin
         run: npm run build
 
@@ -168,6 +183,7 @@ jobs:
 
   deploy-staging:
     name: Deploy to Staging
+    # build-check will skip its steps if triggered by repository_dispatch, but job still succeeds
     needs: [build-check, wait-for-app]
     runs-on: ubuntu-latest
     environment:
