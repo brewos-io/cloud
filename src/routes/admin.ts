@@ -39,7 +39,7 @@ const router = Router();
 // General rate limiter for admin routes
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // Higher limit for admin operations
+  max: 500, // Higher limit for admin operations (increased for logs viewer)
   standardHeaders: true,
   legacyHeaders: false,
   validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy

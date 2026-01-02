@@ -16,7 +16,7 @@ import {
 import { api, ApiError } from "../lib/api";
 import type { LogEntry, LogLevel, LogStats } from "../lib/types";
 
-const POLL_INTERVAL_MS = 2000; // Poll every 2 seconds for new logs
+const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds for new logs
 const MAX_LOGS_DISPLAY = 1000; // Max logs to display in UI
 
 export function Logs() {
@@ -364,7 +364,7 @@ export function Logs() {
         <div
           ref={logsContainerRef}
           onScroll={handleScroll}
-          className="h-[600px] overflow-y-auto font-mono text-sm"
+          className="h-[calc(100vh-400px)] min-h-[600px] overflow-y-auto font-mono text-sm"
         >
           {loading && logs.length === 0 ? (
             <div className="text-center py-8 text-admin-text-secondary">
