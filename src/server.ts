@@ -104,7 +104,7 @@ app.use((_req, res, next) => {
     "default-src 'self'",
     "frame-src 'self' https://accounts.google.com https://*.google.com",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://*.google.com https://www.googletagmanager.com https://www.google-analytics.com",
-    "connect-src 'self' https://accounts.google.com https://*.google.com https://*.googleusercontent.com https://fonts.googleapis.com https://www.googletagmanager.com wss://cloud.brewos.io ws://localhost:* http://localhost:*",
+    "connect-src 'self' https://accounts.google.com https://*.google.com https://*.googleusercontent.com https://fonts.googleapis.com https://fonts.gstatic.com https://www.googletagmanager.com wss://cloud.brewos.io ws://localhost:* http://localhost:*",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
