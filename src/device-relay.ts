@@ -176,7 +176,16 @@ export class DeviceRelay {
         if (isBinary) {
           // Binary MessagePack format
           // Device may send multiple messages in one frame, so try decodeMulti first
-          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          let buffer: Buffer;
+          if (Buffer.isBuffer(data)) {
+            buffer = data;
+          } else if (data instanceof ArrayBuffer) {
+            buffer = Buffer.from(new Uint8Array(data));
+          } else if (Array.isArray(data)) {
+            buffer = Buffer.concat(data);
+          } else {
+            buffer = Buffer.from(data as any);
+          }
           const uint8Array = new Uint8Array(buffer);
 
           // Try to decode multiple messages first (device may send multiple in one frame)
