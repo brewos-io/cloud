@@ -12,6 +12,9 @@ import type { DeviceMessage } from "./types.js";
 
 // Ping interval for keep-alive (30 seconds for clients - less aggressive than devices)
 const PING_INTERVAL_MS = 30000;
+// Keepalive message interval when device is offline (send app-level messages to prevent stale detection)
+// Client's stale threshold is 10s, so send every 3s to stay well under threshold
+const KEEPALIVE_INTERVAL_MS = 3000;
 // Disconnect after this many missed pongs
 const MAX_MISSED_PONGS = 2;
 // Warn client this many ms before token expires
@@ -98,6 +101,7 @@ export class ClientProxy {
   private deviceClients = new Map<string, Set<string>>(); // deviceId -> sessionIds
   private deviceRelay: DeviceRelay;
   private pingInterval: NodeJS.Timeout | null = null;
+  private keepaliveInterval: NodeJS.Timeout | null = null;
   private pendingMessages = new Map<string, PendingMessage[]>(); // deviceId -> messages
   private messageQueueCleanupInterval: NodeJS.Timeout | null = null;
   private deviceStateCache = new Map<string, DeviceStateCache>(); // deviceId -> cached state
@@ -141,6 +145,12 @@ export class ClientProxy {
     this.pingInterval = setInterval(() => {
       this.pingAllClients();
     }, PING_INTERVAL_MS);
+
+    // Start keepalive interval for offline devices (application-level messages)
+    // This prevents client's stale connection detection when device is offline
+    this.keepaliveInterval = setInterval(() => {
+      this.sendKeepaliveToOfflineDevices();
+    }, KEEPALIVE_INTERVAL_MS);
 
     // Start message queue cleanup interval
     this.messageQueueCleanupInterval = setInterval(() => {
@@ -360,6 +370,24 @@ export class ClientProxy {
       // Send ping
       if (connection.ws.readyState === WebSocket.OPEN) {
         connection.ws.ping();
+      }
+      
+    });
+  }
+
+  /**
+   * Send application-level keepalive messages to clients with offline devices
+   * This prevents client's stale connection detection (which looks for application messages)
+   * WebSocket-level ping/pong doesn't trigger onmessage, so we need application messages
+   */
+  private sendKeepaliveToOfflineDevices(): void {
+    this.clients.forEach((connection) => {
+      const deviceOnline = this.deviceRelay.isDeviceConnected(connection.deviceId);
+      if (!deviceOnline && connection.ws.readyState === WebSocket.OPEN) {
+        this.sendToClient(connection, {
+          type: "keepalive",
+          timestamp: Date.now(),
+        });
       }
     });
   }
@@ -795,6 +823,10 @@ export class ClientProxy {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
     }
     if (this.messageQueueCleanupInterval) {
       clearInterval(this.messageQueueCleanupInterval);
