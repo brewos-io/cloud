@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { IncomingMessage } from "http";
-import { decode, decodeMulti } from "@msgpack/msgpack";
+import { decode, decodeMulti, Decoder } from "@msgpack/msgpack";
 import type { DeviceMessage } from "./types.js";
 import {
   verifyDeviceKey,
@@ -168,7 +168,7 @@ export class DeviceRelay {
       connection.lastSeen = new Date();
       connection.missedPings = 0; // Any message means device is alive
       try {
-        let message: DeviceMessage;
+        let message: DeviceMessage | null = null;
 
         // Check if message is binary (MessagePack) or text (legacy JSON)
         if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
@@ -179,6 +179,7 @@ export class DeviceRelay {
 
           // Try to decode multiple messages first (device may send multiple in one frame)
           // decodeMulti works for both single and multiple messages
+          let decodeMultiSucceeded = false;
           try {
             const messages = Array.from(decodeMulti(uint8Array));
 
@@ -187,26 +188,79 @@ export class DeviceRelay {
               for (const msg of messages) {
                 this.handleDeviceMessage(deviceId, msg as DeviceMessage);
               }
+              decodeMultiSucceeded = true;
               return; // Successfully processed all messages
             }
             // If decodeMulti returned empty array, fall through to single decode
-          } catch {
-            // decodeMulti failed - might be malformed or single message format issue
-            // Fall through to single decode as fallback
+          } catch (multiError) {
+            // decodeMulti failed - try Decoder instance as alternative
+            try {
+              const decoder = new Decoder();
+              const messages: DeviceMessage[] = [];
+              for (const msg of decoder.decodeMulti(uint8Array)) {
+                messages.push(msg as DeviceMessage);
+              }
+
+              if (messages.length > 0) {
+                // Process each message
+                for (const msg of messages) {
+                  this.handleDeviceMessage(deviceId, msg);
+                }
+                decodeMultiSucceeded = true;
+                return; // Successfully processed all messages
+              }
+            } catch (decoderError) {
+              // Both decodeMulti and Decoder failed - log for debugging
+              const errorMsg =
+                multiError instanceof Error
+                  ? multiError.message
+                  : String(multiError);
+              const decoderErrorMsg =
+                decoderError instanceof Error
+                  ? decoderError.message
+                  : String(decoderError);
+              // Only log if it's not the expected "extra bytes" error
+              if (
+                !errorMsg.includes("Extra") &&
+                !errorMsg.includes("extra") &&
+                !decoderErrorMsg.includes("Extra") &&
+                !decoderErrorMsg.includes("extra")
+              ) {
+                console.warn(
+                  `[Device] Both decodeMulti methods failed for ${deviceId}, trying single decode:`,
+                  `decodeMulti: ${errorMsg}, Decoder: ${decoderErrorMsg}`
+                );
+              }
+            }
           }
 
           // Fallback: try single decode (for single messages or if decodeMulti failed)
-          try {
-            message = decode(uint8Array) as DeviceMessage;
-          } catch (singleDecodeError) {
-            console.error(
-              `[Device] MessagePack decode failed for ${deviceId}:`,
-              singleDecodeError instanceof Error
-                ? singleDecodeError.message
-                : singleDecodeError,
-              `Buffer length: ${buffer.length}`
-            );
-            return; // Don't process invalid messages
+          // Only try if decodeMulti didn't succeed
+          if (!decodeMultiSucceeded) {
+            try {
+              message = decode(uint8Array) as DeviceMessage;
+            } catch (singleDecodeError) {
+              const errorMsg =
+                singleDecodeError instanceof Error
+                  ? singleDecodeError.message
+                  : String(singleDecodeError);
+
+              // If single decode also fails with "Extra bytes", it means there are multiple messages
+              // but decodeMulti didn't handle them - this shouldn't happen but log it
+              if (errorMsg.includes("Extra") || errorMsg.includes("extra")) {
+                console.error(
+                  `[Device] MessagePack decode failed for ${deviceId}: Multiple messages detected but decodeMulti failed.`,
+                  `Buffer length: ${buffer.length}, Error: ${errorMsg}`
+                );
+              } else {
+                console.error(
+                  `[Device] MessagePack decode failed for ${deviceId}:`,
+                  errorMsg,
+                  `Buffer length: ${buffer.length}`
+                );
+              }
+              return; // Don't process invalid messages
+            }
           }
         } else {
           // Legacy text/JSON format
@@ -223,7 +277,9 @@ export class DeviceRelay {
           }
         }
 
-        this.handleDeviceMessage(deviceId, message);
+        if (message) {
+          this.handleDeviceMessage(deviceId, message);
+        }
       } catch (err) {
         console.error(`[Device] Invalid message from ${deviceId}:`, err);
       }
