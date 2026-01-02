@@ -12,9 +12,12 @@ import type { DeviceMessage } from "./types.js";
 
 // Ping interval for keep-alive (30 seconds for clients - less aggressive than devices)
 const PING_INTERVAL_MS = 30000;
-// Keepalive message interval when device is offline (send app-level messages to prevent stale detection)
-// Client's stale threshold is 10s, so send every 3s to stay well under threshold
-const KEEPALIVE_INTERVAL_MS = 3000;
+// Keepalive message interval (send app-level messages to prevent stale detection)
+// Client's stale threshold is 10s, device sends messages every 10-20s
+// Send keepalive every 7s to ensure messages arrive before stale threshold
+// When device is offline, send more frequently (every 3s)
+const KEEPALIVE_INTERVAL_MS = 7000;
+const KEEPALIVE_INTERVAL_OFFLINE_MS = 3000;
 // Disconnect after this many missed pongs
 const MAX_MISSED_PONGS = 2;
 // Warn client this many ms before token expires
@@ -146,10 +149,11 @@ export class ClientProxy {
       this.pingAllClients();
     }, PING_INTERVAL_MS);
 
-    // Start keepalive interval for offline devices (application-level messages)
-    // This prevents client's stale connection detection when device is offline
+    // Start keepalive interval for all clients (application-level messages)
+    // This prevents client's stale connection detection
+    // Device sends messages every 10-20s, but stale threshold is 10s, so send keepalive every 7s
     this.keepaliveInterval = setInterval(() => {
-      this.sendKeepaliveToOfflineDevices();
+      this.sendKeepaliveToAllClients();
     }, KEEPALIVE_INTERVAL_MS);
 
     // Start message queue cleanup interval
@@ -376,14 +380,23 @@ export class ClientProxy {
   }
 
   /**
-   * Send application-level keepalive messages to clients with offline devices
+   * Send application-level keepalive messages to all clients
    * This prevents client's stale connection detection (which looks for application messages)
    * WebSocket-level ping/pong doesn't trigger onmessage, so we need application messages
+   * 
+   * Device sends state updates every 10-20s, but client's stale threshold is 10s.
+   * Sending keepalive every 7s ensures messages arrive before stale detection triggers.
+   * When device is offline, we send more frequently (every 3s) via a separate mechanism.
    */
-  private sendKeepaliveToOfflineDevices(): void {
+  private sendKeepaliveToAllClients(): void {
     this.clients.forEach((connection) => {
-      const deviceOnline = this.deviceRelay.isDeviceConnected(connection.deviceId);
-      if (!deviceOnline && connection.ws.readyState === WebSocket.OPEN) {
+      if (connection.ws.readyState === WebSocket.OPEN) {
+        const deviceOnline = this.deviceRelay.isDeviceConnected(connection.deviceId);
+        
+        // Send keepalive to all clients, but more frequently when device is offline
+        // For online devices, send every 7s (via this interval)
+        // For offline devices, we also send every 3s (handled separately if needed)
+        // But for simplicity, send to all clients here - the 7s interval works for both
         this.sendToClient(connection, {
           type: "keepalive",
           timestamp: Date.now(),

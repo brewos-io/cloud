@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { IncomingMessage } from "http";
+import { decode } from "@msgpack/msgpack";
 import type { DeviceMessage } from "./types.js";
 import {
   verifyDeviceKey,
@@ -163,11 +164,49 @@ export class DeviceRelay {
     }
 
     // Handle messages from device
-    ws.on("message", (data: RawData) => {
+    ws.on("message", async (data: RawData) => {
       connection.lastSeen = new Date();
       connection.missedPings = 0; // Any message means device is alive
       try {
-        const message: DeviceMessage = JSON.parse(data.toString());
+        let message: DeviceMessage;
+
+        // Check if message is binary (MessagePack) or text (legacy JSON)
+        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+          // Binary MessagePack format
+          try {
+            const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+            const uint8Array = new Uint8Array(buffer);
+            message = decode(uint8Array) as DeviceMessage;
+          } catch (decodeError) {
+            console.error(
+              `[Device] MessagePack decode failed for ${deviceId}:`,
+              decodeError,
+              `Buffer length: ${
+                data instanceof ArrayBuffer
+                  ? data.byteLength
+                  : Buffer.isBuffer(data)
+                  ? data.length
+                  : "unknown"
+              }`
+            );
+            // Don't process invalid messages
+            return;
+          }
+        } else {
+          // Legacy text/JSON format
+          try {
+            const text = data.toString();
+            message = JSON.parse(text) as DeviceMessage;
+          } catch (parseError) {
+            console.error(
+              `[Device] JSON parse failed for ${deviceId}:`,
+              parseError,
+              `Data: ${data.toString().substring(0, 100)}`
+            );
+            return;
+          }
+        }
+
         this.handleDeviceMessage(deviceId, message);
       } catch (err) {
         console.error(`[Device] Invalid message from ${deviceId}:`, err);
