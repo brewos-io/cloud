@@ -164,14 +164,16 @@ export class DeviceRelay {
     }
 
     // Handle messages from device
-    ws.on("message", async (data: RawData) => {
+    ws.on("message", async (data: RawData, isBinary: boolean) => {
       connection.lastSeen = new Date();
       connection.missedPings = 0; // Any message means device is alive
       try {
         let message: DeviceMessage | null = null;
 
-        // Check if message is binary (MessagePack) or text (legacy JSON)
-        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+        // Check if message is binary (MessagePack) or text (JSON)
+        // Use isBinary flag from ws library to correctly distinguish frame types
+        // Text frames (JSON) are sent for logs/events, Binary frames (MessagePack) for status updates
+        if (isBinary) {
           // Binary MessagePack format
           // Device may send multiple messages in one frame, so try decodeMulti first
           const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
