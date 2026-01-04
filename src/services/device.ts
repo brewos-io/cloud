@@ -375,6 +375,52 @@ export function updateDeviceStatus(
 }
 
 /**
+ * Update device machine information from device_info message
+ * Updates machine brand, model, type, and firmware version
+ */
+export function updateDeviceMachineInfo(
+  deviceId: string,
+  machineBrand?: string | null,
+  machineModel?: string | null,
+  machineType?: string | null,
+  firmwareVersion?: string | null
+): void {
+  const db = getDb();
+  const now = nowUTC();
+
+  // Build update query dynamically based on what fields are provided
+  const updates: string[] = ["updated_at = ?"];
+  const values: unknown[] = [now];
+
+  if (machineBrand !== undefined && machineBrand !== null) {
+    updates.push("machine_brand = ?");
+    values.push(machineBrand);
+  }
+  if (machineModel !== undefined && machineModel !== null) {
+    updates.push("machine_model = ?");
+    values.push(machineModel);
+  }
+  if (machineType !== undefined && machineType !== null) {
+    updates.push("machine_type = ?");
+    values.push(machineType);
+  }
+  if (firmwareVersion !== undefined && firmwareVersion !== null) {
+    updates.push("firmware_version = ?");
+    values.push(firmwareVersion);
+  }
+
+  // Only update if we have at least one field to update (besides updated_at)
+  if (updates.length > 1) {
+    values.push(deviceId);
+    db.run(
+      `UPDATE devices SET ${updates.join(", ")} WHERE id = ?`,
+      values
+    );
+    saveDatabase();
+  }
+}
+
+/**
  * Mark all devices as offline (used on server startup)
  * This prevents stale online states from a previous server run
  */

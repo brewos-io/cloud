@@ -6,6 +6,7 @@ import {
   verifyDeviceKey,
   updateDeviceStatus,
   syncOnlineDevicesWithConnections,
+  updateDeviceMachineInfo,
 } from "./services/device.js";
 
 interface DeviceConnection {
@@ -270,6 +271,24 @@ export class DeviceRelay {
     // Add device ID to message
     message.deviceId = deviceId;
     message.timestamp = message.timestamp || Date.now();
+
+    // Process device_info messages to update database
+    if (message.type === "device_info") {
+      try {
+        updateDeviceMachineInfo(
+          deviceId,
+          message.machineBrand as string | undefined,
+          message.machineModel as string | undefined,
+          message.machineType as string | undefined,
+          message.firmwareVersion as string | undefined
+        );
+        console.log(
+          `[Device] Updated machine info for ${deviceId}: brand=${message.machineBrand || "—"}, model=${message.machineModel || "—"}, type=${message.machineType || "—"}, firmware=${message.firmwareVersion || "—"}`
+        );
+      } catch (err) {
+        console.error(`[Device] Failed to update machine info for ${deviceId}:`, err);
+      }
+    }
 
     // Log important message types for debugging
     if (message.type === "status" || message.type === "device_info") {
