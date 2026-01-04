@@ -6,7 +6,7 @@ import {
   verifyDeviceKey,
   updateDeviceStatus,
   syncOnlineDevicesWithConnections,
-  updateDeviceMachineInfo,
+  updateDeviceInfoFromMessage,
 } from "./services/device.js";
 
 interface DeviceConnection {
@@ -275,7 +275,7 @@ export class DeviceRelay {
     // Process device_info messages to update database
     if (message.type === "device_info") {
       try {
-        updateDeviceMachineInfo(
+        updateDeviceInfoFromMessage(
           deviceId,
           message.machineBrand as string | undefined,
           message.machineModel as string | undefined,

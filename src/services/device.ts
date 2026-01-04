@@ -377,8 +377,9 @@ export function updateDeviceStatus(
 /**
  * Update device machine information from device_info message
  * Updates machine brand, model, type, and firmware version
+ * Called when device sends device_info message (device-initiated)
  */
-export function updateDeviceMachineInfo(
+export function updateDeviceInfoFromMessage(
   deviceId: string,
   machineBrand?: string | null,
   machineModel?: string | null,
