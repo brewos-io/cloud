@@ -369,5 +369,62 @@ router.post("/pico", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/logs/debug
+ * Enable or disable DEBUG level logs
+ */
+router.post("/debug", async (req: Request, res: Response) => {
+  try {
+    const deviceId = req.query.device as string;
+    const userId = req.user!.id;
+
+    if (!deviceId) {
+      return res.status(400).json({ error: "Missing device parameter" });
+    }
+
+    // Verify user owns device
+    if (!userOwnsDevice(userId, deviceId)) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+
+    // Parse form data
+    const enabled = req.body.enabled === "true" || req.body.enabled === true;
+
+    // Get device relay from request context
+    const deviceRelay = (req as Request & { deviceRelay?: DeviceRelay }).deviceRelay;
+    if (!deviceRelay) {
+      return res.status(500).json({ error: "Device relay not available" });
+    }
+
+    // Check if device is connected
+    if (!deviceRelay.isDeviceConnected(deviceId)) {
+      return res.status(503).json({ error: "Device not connected" });
+    }
+
+    // Send request to device
+    const response = await sendDeviceRequest(
+      deviceRelay,
+      deviceId,
+      {
+        type: "set_debug_logs_enabled",
+        enabled,
+        timestamp: Date.now(),
+      }
+    );
+
+    res.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to toggle debug logs";
+    if (message.includes("timeout")) {
+      res.status(504).json({ error: "Device request timeout" });
+    } else if (message.includes("not connected")) {
+      res.status(503).json({ error: message });
+    } else {
+      console.error("[Logs] Failed to toggle debug logs:", error);
+      res.status(500).json({ error: message });
+    }
+  }
+});
+
 export default router;
 
