@@ -398,6 +398,15 @@ jobs:
                 # Update existing APP_DIST_PATH line
                 sed -i 's|APP_DIST_PATH=.*|APP_DIST_PATH=/app/web|' docker-compose.yml
               fi
+              
+              # Add ENVIRONMENT=cloud to environment section if not already present
+              if ! grep -q "ENVIRONMENT=" docker-compose.yml; then
+                # Insert ENVIRONMENT after APP_DIST_PATH line
+                sed -i '/APP_DIST_PATH/a\      - ENVIRONMENT=cloud' docker-compose.yml
+              else
+                # Update existing ENVIRONMENT line
+                sed -i 's|ENVIRONMENT=.*|ENVIRONMENT=cloud|' docker-compose.yml
+              fi
             fi
 
             # Build Admin UI
