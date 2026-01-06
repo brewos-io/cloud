@@ -252,6 +252,50 @@ app.use(
   })
 );
 
+// Middleware to intercept actual HTML files and inject Google Analytics
+// SPA routes (like /login, /onboarding) are handled by the SPA fallback route below
+// This only handles actual .html files that exist in the dist folder
+app.use((req, res, next) => {
+  // Skip if it's an asset, API route, service worker, or admin
+  if (
+    req.path.startsWith("/assets/") ||
+    req.path.startsWith("/api/") ||
+    req.path === "/sw.js" ||
+    req.path.startsWith("/admin")
+  ) {
+    return next();
+  }
+
+  // Only intercept actual .html file requests (not SPA routes)
+  if (req.path.endsWith(".html")) {
+    const filePath = path.join(webDistPath, req.path);
+
+    // Check if file exists
+    if (existsSync(filePath)) {
+      try {
+        const html = readFileSync(filePath, "utf-8");
+        // Only inject if it's actually HTML content
+        if (
+          html.trim().startsWith("<!DOCTYPE") ||
+          html.trim().startsWith("<!doctype") ||
+          html.trim().startsWith("<html")
+        ) {
+          const htmlWithAnalytics = injectGoogleAnalytics(html);
+          res.setHeader("Cache-Control", "no-cache, must-revalidate");
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          return res.send(htmlWithAnalytics);
+        }
+      } catch (error) {
+        // If reading fails, fall through to static middleware
+        console.error(`[Server] Failed to read HTML file: ${filePath}`, error);
+      }
+    }
+  }
+
+  // For non-HTML files or SPA routes, continue to static middleware or SPA fallback
+  next();
+});
+
 app.use(
   express.static(webDistPath, {
     // Other static files: cache for 1 hour but always revalidate
