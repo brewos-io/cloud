@@ -156,7 +156,9 @@ const staticFileLimiter = rateLimit({
 // Helper function to inject Google Analytics into HTML
 // Only injects in production mode (not local/staging)
 function injectGoogleAnalytics(html: string): string {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    process.env.ENVIRONMENT === "cloud";
   const isStaging =
     process.env.STAGING === "true" || process.env.ENVIRONMENT === "staging";
 
