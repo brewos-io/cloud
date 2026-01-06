@@ -17,6 +17,8 @@ services:
       - APP_DIST_PATH=/app/app/dist
       - WEB_DIST_PATH=/app/web
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
       - TRUST_PROXY=${TRUST_PROXY:-false}
     restart: unless-stopped
     # Allow time for database to save on shutdown
