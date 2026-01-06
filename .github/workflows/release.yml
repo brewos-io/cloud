@@ -376,6 +376,7 @@ jobs:
             DATA_DIR=/data
             TRUST_PROXY=true
             APP_DIST_PATH=/app/web
+            ENVIRONMENT=cloud
             EOF
 
             # Update docker-compose.yml for production deployment
