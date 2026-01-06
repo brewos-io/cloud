@@ -153,6 +153,48 @@ const staticFileLimiter = rateLimit({
   validate: { trustProxy: false }, // Skip validation - we trust our reverse proxy
 });
 
+// Helper function to inject Google Analytics into HTML
+// Only injects in production mode (not local/staging)
+function injectGoogleAnalytics(html: string): string {
+  const isProduction = process.env.NODE_ENV === "production";
+  const isStaging =
+    process.env.STAGING === "true" || process.env.ENVIRONMENT === "staging";
+
+  // Only inject in production, not in staging or local
+  if (!isProduction || isStaging) {
+    return html;
+  }
+
+  const googleAnalyticsScript = `
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XD04JFCCYN"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-XD04JFCCYN');
+</script>`;
+
+  // Inject before closing </head> tag
+  return html.replace("</head>", `${googleAnalyticsScript}\n</head>`);
+}
+
+// Helper function to serve HTML with Google Analytics injection
+function serveHtmlWithAnalytics(filePath: string, res: express.Response): void {
+  res.setHeader("Cache-Control", "no-cache, must-revalidate");
+
+  try {
+    const html = readFileSync(filePath, "utf-8");
+    const htmlWithAnalytics = injectGoogleAnalytics(html);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(htmlWithAnalytics);
+  } catch (error) {
+    console.error(`[Server] Failed to read HTML file: ${filePath}`, error);
+    res.status(500).send("Internal Server Error");
+  }
+}
+
 // Serve admin UI at /admin
 // Admin assets with long cache (hashed files)
 app.use(
@@ -166,13 +208,11 @@ app.use(
 // Admin SPA fallback - serve index.html for all admin routes
 // MUST come before the static middleware to prevent redirect from /admin to /admin/
 app.get("/admin", staticFileLimiter, (_req, res) => {
-  res.setHeader("Cache-Control", "no-cache, must-revalidate");
-  res.sendFile(path.join(adminDistPath, "index.html"));
+  serveHtmlWithAnalytics(path.join(adminDistPath, "index.html"), res);
 });
 
 app.get("/admin/*", staticFileLimiter, (_req, res) => {
-  res.setHeader("Cache-Control", "no-cache, must-revalidate");
-  res.sendFile(path.join(adminDistPath, "index.html"));
+  serveHtmlWithAnalytics(path.join(adminDistPath, "index.html"), res);
 });
 
 // Admin static files (for favicon.svg and other static assets)
@@ -197,9 +237,8 @@ app.get("/sw.js", staticFileLimiter, (_req, res) => {
 });
 
 // Cache control for index.html - should revalidate on each request
-app.get("/index.html", staticFileLimiter, (_req, res) => {
-  res.setHeader("Cache-Control", "no-cache, must-revalidate");
-  res.sendFile(path.join(webDistPath, "index.html"));
+app.get("/index.html", staticFileLimiter, (req, res) => {
+  serveHtmlWithAnalytics(path.join(webDistPath, "index.html"), res);
 });
 
 // Static files with proper caching:
@@ -624,7 +663,7 @@ app.use(
 
 // SPA fallback
 app.get("*", staticFileLimiter, (_req, res) => {
-  res.sendFile(path.join(webDistPath, "index.html"));
+  serveHtmlWithAnalytics(path.join(webDistPath, "index.html"), res);
 });
 
 // Route WebSocket upgrades based on path
