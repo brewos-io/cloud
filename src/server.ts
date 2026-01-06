@@ -256,7 +256,7 @@ app.use(
 
 // Middleware to intercept actual HTML files and inject Google Analytics
 // SPA routes (like /login, /onboarding) are handled by the SPA fallback route below
-// This only handles actual .html files that exist in the dist folder
+// This handles both .html files and root path requests
 app.use((req, res, next) => {
   // Skip if it's an asset, API route, service worker, or admin
   if (
@@ -268,9 +268,15 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // Only intercept actual .html file requests (not SPA routes)
-  if (req.path.endsWith(".html")) {
-    const filePath = path.join(webDistPath, req.path);
+  // Intercept .html file requests or root path (for SPA)
+  if (req.path.endsWith(".html") || req.path === "/" || req.path === "") {
+    // Determine the file path
+    let filePath: string;
+    if (req.path === "/" || req.path === "") {
+      filePath = path.join(webDistPath, "index.html");
+    } else {
+      filePath = path.join(webDistPath, req.path);
+    }
 
     // Check if file exists
     if (existsSync(filePath)) {
