@@ -97,15 +97,17 @@ app.use((_req, res, next) => {
   // COOP: same-origin-allow-popups allows the Google Sign-In popup to communicate back
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
 
-  // Content Security Policy - Allow Google Sign-In iframes while preventing clickjacking
+  // Content Security Policy - Allow Google Sign-In and Facebook Login while preventing clickjacking
   // frame-src allows Google Sign-In button iframes
-  // script-src allows Google Sign-In scripts
+  // script-src allows Google Sign-In scripts and Facebook SDK
+  // style-src allows Google Sign-In stylesheets
+  // connect-src allows API calls to Google and Facebook
   const csp = [
     "default-src 'self'",
     "frame-src 'self' https://accounts.google.com https://*.google.com",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://*.google.com https://www.googletagmanager.com https://www.google-analytics.com",
-    "connect-src 'self' https://accounts.google.com https://*.google.com https://*.googleusercontent.com https://fonts.googleapis.com https://fonts.gstatic.com https://www.googletagmanager.com wss://cloud.brewos.io ws://localhost:* http://localhost:*",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://*.google.com https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net",
+    "connect-src 'self' https://accounts.google.com https://*.google.com https://*.googleusercontent.com https://fonts.googleapis.com https://fonts.gstatic.com https://www.googletagmanager.com https://graph.facebook.com wss://cloud.brewos.io ws://localhost:* http://localhost:*",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
   ].join("; ");
