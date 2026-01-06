@@ -31,7 +31,6 @@ export function Logs() {
   const [hasMore, setHasMore] = useState(false);
   const [lastLogId, setLastLogId] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
 
   // Load logs
@@ -108,21 +107,20 @@ export function Logs() {
     return () => clearInterval(interval);
   }, [autoRefresh, loadLogs, loadStats]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to top (newest logs)
   useEffect(() => {
-    if (autoScroll && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (autoScroll && logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = 0;
     }
   }, [logs, autoScroll]);
 
-  // Handle scroll to detect if user scrolled up
+  // Handle scroll to detect if user scrolled down
   const handleScroll = () => {
     if (!logsContainerRef.current) return;
     const container = logsContainerRef.current;
-    const isAtBottom =
-      container.scrollHeight - container.scrollTop <=
-      container.clientHeight + 100;
-    setAutoScroll(isAtBottom);
+    // If user scrolled down from top, disable auto-scroll
+    const isAtTop = container.scrollTop <= 100;
+    setAutoScroll(isAtTop);
   };
 
   // Filter logs
@@ -415,7 +413,6 @@ export function Logs() {
                   results.
                 </div>
               )}
-              <div ref={logsEndRef} />
             </>
           )}
         </div>
