@@ -288,6 +288,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 ## Related Repositories
 
+- **[wiki](https://github.com/brewos-io/wiki)** - Complete user documentation and guides
 - **[app](https://github.com/brewos-io/app)** - Progressive Web App (served by this service)
 - **[firmware](https://github.com/brewos-io/firmware)** - ESP32 firmware (connects to this service)
 - **[web](https://github.com/brewos-io/web)** - Marketing website
