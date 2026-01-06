@@ -323,12 +323,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.4
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         with:
           host: ${{ secrets.SERVER_SSH_HOST || 'cloud.brewos.io' }}
           username: root
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: GOOGLE_CLIENT_ID,RELEASE_VERSION
+          envs: GOOGLE_CLIENT_ID,FACEBOOK_APP_ID,FACEBOOK_APP_SECRET,RELEASE_VERSION
           command_timeout: 15m
           script: |
             set -e
@@ -368,6 +370,8 @@ jobs:
             # Create .env for cloud service
             cat > .env << EOF
             GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+            FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
             PORT=3001
             DATA_DIR=/data
             TRUST_PROXY=true
