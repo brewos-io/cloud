@@ -22,6 +22,10 @@
 
 BrewOS Cloud is a WebSocket relay service that enables secure remote access to BrewOS espresso machines. It provides authentication, device pairing, push notifications, and serves the BrewOS Progressive Web App.
 
+<p align="center">
+  <a href="https://cloud.brewos.io/?demo=true">🚀 Try the Live Demo</a>
+</p>
+
 ### Key Features
 
 - 🔐 **Google OAuth** - Secure authentication
