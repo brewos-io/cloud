@@ -20,6 +20,7 @@ import devicesRouter from "./routes/devices.js";
 import pushRouter from "./routes/push.js";
 import adminRouter from "./routes/admin.js";
 import logsRouter from "./routes/logs.js";
+import firmwareRouter from "./routes/firmware.js";
 import { initDatabase } from "./lib/database.js";
 import {
   cleanupExpiredTokens,
@@ -670,6 +671,7 @@ app.use(
   devicesRouter
 );
 app.use("/api/push", pushRouter);
+app.use("/api/firmware", firmwareRouter);
 
 // Logs routes - inject device relay for proxying device log API calls
 app.use(
