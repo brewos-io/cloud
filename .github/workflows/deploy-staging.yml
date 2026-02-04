@@ -2,18 +2,21 @@
 # Production deploys happen via release.yml when a version tag is pushed
 # Updated: Added VITE_GOOGLE_CLIENT_ID support in app CI workflow
 # Updated: Added repository_dispatch trigger to allow app repo to trigger staging deployment
+# DISABLED: Staging deployment - uncomment the 'on' block below and remove workflow_dispatch to re-enable
 name: "Main → Deploy to Staging"
 
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - "src/**"
+#       - "admin/**"
+#       - "package.json"
+#       - ".github/workflows/deploy-staging.yml"
+#   repository_dispatch:
+#     types: [deploy-staging]
 on:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "admin/**"
-      - "package.json"
-      - ".github/workflows/deploy-staging.yml"
-  repository_dispatch:
-    types: [deploy-staging]
+  workflow_dispatch: {}  # Manual only while staging is disabled
 
 # Only allow one deploy at a time - cancel older runs
 concurrency:
